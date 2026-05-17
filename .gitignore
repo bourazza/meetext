@@ -1,0 +1,22 @@
+# Logs
+apps/api/logs/
+*.log
+
+# Uploads
+apps/api/uploads/
+
+# Binaries
+bin/
+apps/api/tmp/
+
+# Environment
+.env
+apps/api/.env
+
+# Go
+*.test
+coverage.out
+
+# OS
+.DS_Store
+Thumbs.db

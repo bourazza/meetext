@@ -1,0 +1,26 @@
+DROP TABLE IF EXISTS notifications;
+DROP TABLE IF EXISTS ai_processing_logs;
+DROP TABLE IF EXISTS exports;
+DROP TABLE IF EXISTS integrations;
+DROP TABLE IF EXISTS documents;
+DROP TABLE IF EXISTS blockers;
+DROP TABLE IF EXISTS decisions;
+DROP TABLE IF EXISTS deadlines;
+DROP TABLE IF EXISTS goals;
+DROP TABLE IF EXISTS tasks;
+DROP TABLE IF EXISTS meeting_participants;
+DROP TABLE IF EXISTS meetings;
+DROP TABLE IF EXISTS projects;
+DROP TABLE IF EXISTS clients;
+DROP TABLE IF EXISTS workspace_members;
+DROP TABLE IF EXISTS workspaces;
+DROP TABLE IF EXISTS users;
+
+DROP TYPE IF EXISTS document_type;
+DROP TYPE IF EXISTS project_status;
+DROP TYPE IF EXISTS task_priority;
+DROP TYPE IF EXISTS task_status;
+DROP TYPE IF EXISTS meeting_status;
+DROP TYPE IF EXISTS upload_type;
+DROP TYPE IF EXISTS workspace_role;
+DROP TYPE IF EXISTS subscription_plan;

@@ -1,0 +1,13 @@
+[build]
+  cmd = "go build -o ./tmp/api ./cmd/api"
+  bin = "./tmp/api"
+  include_ext = ["go"]
+  exclude_dir = ["tmp", "vendor", "migrations", "tests"]
+  delay = 500
+
+[log]
+  time = true
+
+[color]
+  build = "yellow"
+  runner = "green"
