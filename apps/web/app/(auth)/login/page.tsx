@@ -1,36 +1,59 @@
 'use client'
 
-import { useForm } from 'react-hook-form'
-import { zodResolver } from '@hookform/resolvers/zod'
-import { z } from 'zod'
-import { useRouter, useSearchParams } from 'next/navigation'
+import { Suspense, useEffect } from 'react'
 import Link from 'next/link'
+import { useRouter, useSearchParams } from 'next/navigation'
+import { zodResolver } from '@hookform/resolvers/zod'
+import { useForm } from 'react-hook-form'
 import { toast } from 'sonner'
-import { useEffect } from 'react'
+import { z } from 'zod'
+import {
+  AuthLink,
+  AuthPanel,
+  Divider,
+  Field,
+  OAuthButtons,
+  StatusCard,
+  SubmitButton,
+  inputClass,
+} from '@/components/auth/auth-ui'
 import { login } from '@/services/auth'
 import { useAuthStore } from '@/store/auth'
 
 const schema = z.object({
-  email: z.string().email('Invalid email'),
-  password: z.string().min(1, 'Password is required'),
+  email: z.string().email('Enter a work email address.'),
+  password: z.string().min(1, 'Enter your password.'),
+  remember_me: z.boolean().default(true),
 })
 
 type FormData = z.infer<typeof schema>
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8080'
-
 export default function LoginPage() {
+  return (
+    <Suspense fallback={<LoginFallback />}>
+      <LoginCard />
+    </Suspense>
+  )
+}
+
+function LoginCard() {
   const router = useRouter()
   const params = useSearchParams()
   const { setUser, setWorkspace } = useAuthStore()
+  const redirectTo = params.get('next') || '/dashboard'
 
   useEffect(() => {
     const error = params.get('error')
-    if (error) toast.error(`OAuth sign-in failed: ${error.replace(/_/g, ' ')}`)
+    if (error) toast.error(error.replace(/_/g, ' '))
   }, [params])
 
-  const { register, handleSubmit, formState: { errors, isSubmitting } } = useForm<FormData>({
+  const {
+    register,
+    handleSubmit,
+    formState: { errors, isSubmitting },
+  } = useForm<FormData>({
     resolver: zodResolver(schema),
+    defaultValues: { remember_me: true },
   })
 
   const onSubmit = async (values: FormData) => {
@@ -38,101 +61,70 @@ export default function LoginPage() {
       const res = await login(values)
       setUser(res.user)
       if (res.workspace) setWorkspace(res.workspace)
-      router.push('/dashboard')
+      router.push(redirectTo)
     } catch (err: any) {
-      const msg = err?.response?.data?.error?.message ?? 'Login failed'
-      toast.error(msg)
+      toast.error(err?.response?.data?.error?.message ?? 'Could not sign you in.')
     }
   }
 
   return (
-    <div className="bg-card border rounded-xl p-8 shadow-sm">
-      <h2 className="text-xl font-semibold mb-6">Sign in to your account</h2>
-
-      {/* OAuth buttons */}
-      <div className="space-y-3 mb-6">
-        <a
-          href={`${API_URL}/api/v1/auth/oauth/google`}
-          className="flex items-center justify-center gap-3 w-full border rounded-md px-4 py-2 text-sm font-medium hover:bg-muted transition"
-        >
-          <GoogleIcon />
-          Continue with Google
-        </a>
-        <a
-          href={`${API_URL}/api/v1/auth/oauth/github`}
-          className="flex items-center justify-center gap-3 w-full border rounded-md px-4 py-2 text-sm font-medium hover:bg-muted transition"
-        >
-          <GitHubIcon />
-          Continue with GitHub
-        </a>
-      </div>
-
-      <div className="relative mb-6">
-        <div className="absolute inset-0 flex items-center">
-          <span className="w-full border-t" />
+    <AuthPanel
+      eyebrow="Welcome back"
+      title="Sign in to Meetext"
+      subtitle="Continue to your meeting workspace and pick up exactly where the client conversation left off."
+      footer={
+        <>
+          New to Meetext? <AuthLink href="/register">Create an account</AuthLink>
+        </>
+      }
+    >
+      {params.get('verified') === 'true' && (
+        <div className="mb-5">
+          <StatusCard tone="success" title="Email verified">
+            You are all set. Sign in to continue.
+          </StatusCard>
         </div>
-        <div className="relative flex justify-center text-xs uppercase">
-          <span className="bg-card px-2 text-muted-foreground">or continue with email</span>
+      )}
+      {params.get('reset') === 'true' && (
+        <div className="mb-5">
+          <StatusCard tone="success" title="Password updated">
+            Your new password is ready to use.
+          </StatusCard>
         </div>
-      </div>
+      )}
+
+      <OAuthButtons />
+      <Divider />
 
       <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
-        <div>
-          <label className="text-sm font-medium">Email</label>
-          <input
-            {...register('email')}
-            type="email"
-            placeholder="you@example.com"
-            className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-          />
-          {errors.email && <p className="text-destructive text-xs mt-1">{errors.email.message}</p>}
+        <Field label="Email" error={errors.email?.message}>
+          <input {...register('email')} type="email" autoComplete="email" placeholder="you@studio.com" className={inputClass} />
+        </Field>
+
+        <Field label="Password" error={errors.password?.message}>
+          <input {...register('password')} type="password" autoComplete="current-password" placeholder="Enter your password" className={inputClass} />
+        </Field>
+
+        <div className="flex items-center justify-between gap-3">
+          <label className="inline-flex items-center gap-2 text-sm text-zinc-600">
+            <input {...register('remember_me')} type="checkbox" className="h-4 w-4 rounded border-zinc-300 text-zinc-950" />
+            Remember me
+          </label>
+          <Link href="/forgot-password" className="text-sm font-medium text-zinc-950 underline-offset-4 hover:underline">
+            Forgot password?
+          </Link>
         </div>
 
-        <div>
-          <label className="text-sm font-medium">Password</label>
-          <input
-            {...register('password')}
-            type="password"
-            placeholder="••••••••"
-            className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-          />
-          {errors.password && <p className="text-destructive text-xs mt-1">{errors.password.message}</p>}
-        </div>
-
-        <button
-          type="submit"
-          disabled={isSubmitting}
-          className="w-full bg-primary text-primary-foreground rounded-md py-2 text-sm font-medium hover:opacity-90 disabled:opacity-50 transition"
-        >
-          {isSubmitting ? 'Signing in...' : 'Sign in'}
-        </button>
+        <SubmitButton loading={isSubmitting}>Sign in</SubmitButton>
       </form>
-
-      <p className="text-center text-sm text-muted-foreground mt-6">
-        Don&apos;t have an account?{' '}
-        <Link href="/register" className="text-primary font-medium hover:underline">
-          Create one
-        </Link>
-      </p>
-    </div>
+    </AuthPanel>
   )
 }
 
-function GoogleIcon() {
+function LoginFallback() {
   return (
-    <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
-      <path d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844c-.209 1.125-.843 2.078-1.796 2.717v2.258h2.908c1.702-1.567 2.684-3.875 2.684-6.615z" fill="#4285F4"/>
-      <path d="M9 18c2.43 0 4.467-.806 5.956-2.18l-2.908-2.259c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332A8.997 8.997 0 0 0 9 18z" fill="#34A853"/>
-      <path d="M3.964 10.71A5.41 5.41 0 0 1 3.682 9c0-.593.102-1.17.282-1.71V4.958H.957A8.996 8.996 0 0 0 0 9c0 1.452.348 2.827.957 4.042l3.007-2.332z" fill="#FBBC05"/>
-      <path d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0A8.997 8.997 0 0 0 .957 4.958L3.964 7.29C4.672 5.163 6.656 3.58 9 3.58z" fill="#EA4335"/>
-    </svg>
-  )
-}
-
-function GitHubIcon() {
-  return (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
-      <path d="M12 0C5.37 0 0 5.37 0 12c0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61-.546-1.385-1.335-1.755-1.335-1.755-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 21.795 24 17.298 24 12c0-6.63-5.37-12-12-12z"/>
-    </svg>
+    <AuthPanel eyebrow="Welcome back" title="Sign in to Meetext" subtitle="Preparing your secure sign-in experience.">
+      <div className="h-56 animate-pulse rounded-md bg-zinc-100" />
+    </AuthPanel>
   )
 }

@@ -6,6 +6,7 @@ PID_DIR := ./.pids
 
 API_PORT := 8080
 WEB_PORT := 3000
+WEB_PORTS := 3000 3001 3002 3003 3004 3005
 
 # Load env file if exists
 ifneq (,$(wildcard $(API_DIR)/.env))
@@ -34,16 +35,27 @@ help: ## Show commands
 # INTERNAL HELPERS
 # ─────────────────────────────────────────────────────────────
 
-define kill_port
-	@if lsof -ti:$(1) >/dev/null 2>&1; then \
-		lsof -ti:$(1) | xargs kill -9; \
+define stop_port
+	@pids="$$(lsof -ti:$(1) 2>/dev/null || true)"; \
+	if [ -n "$$pids" ]; then \
+		echo "  - stopping processes on port $(1): $$pids"; \
+		kill -TERM $$pids 2>/dev/null || true; \
+		sleep 1; \
+		kill -KILL $$pids 2>/dev/null || true; \
 	fi
 endef
 
-define kill_pid_file
+define stop_pid_file
 	@if [ -f $(1) ]; then \
-		pkill -P $$(cat $(1)) 2>/dev/null || true; \
-		kill $$(cat $(1)) 2>/dev/null || true; \
+		pid="$$(cat $(1) 2>/dev/null || true)"; \
+		if [ -n "$$pid" ] && kill -0 "$$pid" 2>/dev/null; then \
+			echo "  - stopping $(2) (pid $$pid)"; \
+			kill -TERM "-$$pid" 2>/dev/null || kill -TERM "$$pid" 2>/dev/null || true; \
+			sleep 2; \
+			kill -KILL "-$$pid" 2>/dev/null || kill -KILL "$$pid" 2>/dev/null || true; \
+		else \
+			echo "  - removing stale $(2) pid file"; \
+		fi; \
 		rm -f $(1); \
 	fi
 endef
@@ -59,13 +71,19 @@ start: ## Start API + Web locally
 	@echo "Starting Meetext local environment"
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
-	$(call kill_pid_file,$(PID_DIR)/api.pid)
-	$(call kill_pid_file,$(PID_DIR)/web.pid)
+	$(call stop_pid_file,$(PID_DIR)/api.pid,API)
+	$(call stop_pid_file,$(PID_DIR)/web.pid,Web)
 
-	$(call kill_port,$(API_PORT))
+	$(call stop_port,$(API_PORT))
 
-	@for port in 3000 3001 3002 3003 3004 3005; do \
-		lsof -ti:$$port 2>/dev/null | xargs kill -9 2>/dev/null || true; \
+	@for port in $(WEB_PORTS); do \
+		pids="$$(lsof -ti:$$port 2>/dev/null || true)"; \
+		if [ -n "$$pids" ]; then \
+			echo "  - stopping processes on port $$port: $$pids"; \
+			kill -TERM $$pids 2>/dev/null || true; \
+			sleep 1; \
+			kill -KILL $$pids 2>/dev/null || true; \
+		fi; \
 	done
 	@sleep 2
 
@@ -83,6 +101,7 @@ start: ## Start API + Web locally
 	@for i in $$(seq 1 20); do \
 		curl -sf http://localhost:$(API_PORT)/health >/dev/null 2>&1 && break || sleep 1; \
 	done
+	@curl -sf http://localhost:$(API_PORT)/health >/dev/null 2>&1 || (echo "ERROR: API did not become healthy. Check $(API_DIR)/logs/meetext.log"; tail -50 $(API_DIR)/logs/meetext.log 2>/dev/null || true; exit 1)
 
 	@echo "✓ API running"
 
@@ -105,9 +124,18 @@ start: ## Start API + Web locally
 
 stop: ## Stop all local services
 	@echo "→ Stopping services..."
-	@if [ -f $(PID_DIR)/api.pid ]; then kill -9 $$(cat $(PID_DIR)/api.pid) 2>/dev/null || true; rm -f $(PID_DIR)/api.pid; fi
-	@if [ -f $(PID_DIR)/web.pid ]; then pkill -P $$(cat $(PID_DIR)/web.pid) 2>/dev/null || true; kill -9 $$(cat $(PID_DIR)/web.pid) 2>/dev/null || true; rm -f $(PID_DIR)/web.pid; fi
-	@for port in 8080 3000 3001 3002 3003 3004 3005; do lsof -ti:$$port 2>/dev/null | xargs kill -9 2>/dev/null || true; done
+	$(call stop_pid_file,$(PID_DIR)/api.pid,API)
+	$(call stop_pid_file,$(PID_DIR)/web.pid,Web)
+	$(call stop_port,$(API_PORT))
+	@for port in $(WEB_PORTS); do \
+		pids="$$(lsof -ti:$$port 2>/dev/null || true)"; \
+		if [ -n "$$pids" ]; then \
+			echo "  - stopping processes on port $$port: $$pids"; \
+			kill -TERM $$pids 2>/dev/null || true; \
+			sleep 1; \
+			kill -KILL $$pids 2>/dev/null || true; \
+		fi; \
+	done
 	@echo "✓ All services stopped"
 # ─────────────────────────────────────────────────────────────
 # LOCAL

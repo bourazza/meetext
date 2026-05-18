@@ -35,8 +35,8 @@ type Provider struct {
 }
 
 // NewGoogle returns a configured Google OAuth provider.
-func NewGoogle(cfg config.OAuthConfig) *Provider {
-	return &Provider{
+func NewGoogle(cfg config.OAuthConfig) (*Provider, error) {
+	provider := &Provider{
 		name: user.ProviderGoogle,
 		cfg: &oauth2.Config{
 			ClientID:     cfg.GoogleClientID,
@@ -48,6 +48,10 @@ func NewGoogle(cfg config.OAuthConfig) *Provider {
 		fetchUser:   fetchGoogleUser,
 		stateSecret: cfg.StateSecret,
 	}
+	if err := provider.Validate(); err != nil {
+		return nil, fmt.Errorf("google oauth: %w", err)
+	}
+	return provider, nil
 }
 
 // NewGitHub returns a configured GitHub OAuth provider.
@@ -69,10 +73,40 @@ func NewGitHub(cfg config.OAuthConfig) *Provider {
 // Name returns the user.Provider constant for this provider.
 func (p *Provider) Name() user.Provider { return p.name }
 
-// IsConfigured returns false when client_id or client_secret are empty,
-// which means the provider env vars were not set.
+// IsConfigured returns false when this provider cannot perform a complete
+// OAuth authorization code flow.
 func (p *Provider) IsConfigured() bool {
-	return p.cfg.ClientID != "" && p.cfg.ClientSecret != ""
+	return p != nil &&
+		p.cfg != nil &&
+		strings.TrimSpace(p.cfg.ClientID) != "" &&
+		strings.TrimSpace(p.cfg.ClientSecret) != "" &&
+		strings.TrimSpace(p.cfg.RedirectURL) != "" &&
+		strings.TrimSpace(p.stateSecret) != ""
+}
+
+func (p *Provider) Validate() error {
+	if p == nil || p.cfg == nil {
+		return fmt.Errorf("provider config is nil")
+	}
+
+	var missing []string
+	if strings.TrimSpace(p.cfg.ClientID) == "" {
+		missing = append(missing, "client_id")
+	}
+	if strings.TrimSpace(p.cfg.ClientSecret) == "" {
+		missing = append(missing, "client_secret")
+	}
+	if strings.TrimSpace(p.cfg.RedirectURL) == "" {
+		missing = append(missing, "redirect_url")
+	}
+	if strings.TrimSpace(p.stateSecret) == "" {
+		missing = append(missing, "state_secret")
+	}
+	if len(missing) > 0 {
+		return fmt.Errorf("missing %s", strings.Join(missing, ", "))
+	}
+
+	return nil
 }
 
 // AuthURL returns the provider consent-screen URL with a signed state token.

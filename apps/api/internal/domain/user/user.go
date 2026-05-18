@@ -24,16 +24,18 @@ const (
 )
 
 type User struct {
-	ID           uuid.UUID `json:"id"`
-	FullName     string    `json:"full_name"`
-	Email        string    `json:"email"`
-	PasswordHash string    `json:"-"`
-	AvatarURL    *string   `json:"avatar_url,omitempty"`
-	Plan         Plan      `json:"plan"`
-	Provider     Provider  `json:"provider"`
-	ProviderID   *string   `json:"-"`
-	CreatedAt    time.Time `json:"created_at"`
-	UpdatedAt    time.Time `json:"updated_at"`
+	ID              uuid.UUID  `json:"id"`
+	FullName        string     `json:"full_name"`
+	Email           string     `json:"email"`
+	PasswordHash    string     `json:"-"`
+	AvatarURL       *string    `json:"avatar_url,omitempty"`
+	Plan            Plan       `json:"plan"`
+	Provider        Provider   `json:"provider"`
+	ProviderID      *string    `json:"-"`
+	EmailVerifiedAt *time.Time `json:"email_verified_at,omitempty"`
+	LastLoginAt     *time.Time `json:"last_login_at,omitempty"`
+	CreatedAt       time.Time  `json:"created_at"`
+	UpdatedAt       time.Time  `json:"updated_at"`
 }
 
 type Repository interface {
@@ -42,5 +44,8 @@ type Repository interface {
 	GetByEmail(ctx context.Context, email string) (*User, error)
 	GetByProviderID(ctx context.Context, provider Provider, providerID string) (*User, error)
 	Update(ctx context.Context, u *User) error
+	MarkEmailVerified(ctx context.Context, id uuid.UUID, verifiedAt time.Time) error
+	UpdatePassword(ctx context.Context, id uuid.UUID, passwordHash string, updatedAt time.Time) error
+	RecordLogin(ctx context.Context, id uuid.UUID, loggedInAt time.Time) error
 	Delete(ctx context.Context, id uuid.UUID) error
 }

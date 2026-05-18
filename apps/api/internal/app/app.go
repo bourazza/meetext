@@ -14,6 +14,7 @@ import (
 	"github.com/meetext/backend/internal/delivery/http/router"
 	infraauth "github.com/meetext/backend/internal/infrastructure/auth"
 	"github.com/meetext/backend/internal/infrastructure/db"
+	"github.com/meetext/backend/internal/infrastructure/email"
 	infraoauth "github.com/meetext/backend/internal/infrastructure/oauth"
 	"github.com/meetext/backend/internal/infrastructure/storage"
 	"github.com/meetext/backend/internal/repository/postgres"
@@ -47,23 +48,34 @@ func New(cfg *config.Config, log zerolog.Logger) (*App, error) {
 
 	// Repositories
 	userRepo := postgres.NewUserRepository(pool)
+	authTokenRepo := postgres.NewAuthTokenRepository(pool)
 	workspaceRepo := postgres.NewWorkspaceRepository(pool)
 	meetingRepo := postgres.NewMeetingRepository(pool)
 
 	// Use cases
-	authUC := ucauth.NewUseCase(userRepo, workspaceRepo, jwtSvc)
+	emailSvc := email.NewLogService(log)
+	authUC := ucauth.NewUseCase(userRepo, workspaceRepo, authTokenRepo, jwtSvc, emailSvc, cfg.App.FrontendURL)
 	workspaceUC := ucworkspace.NewUseCase(workspaceRepo)
 	meetingUC := ucmeeting.NewUseCase(meetingRepo, store)
 
 	// OAuth providers
-	googleProvider := infraoauth.NewGoogle(cfg.OAuth)
+	googleProvider, err := infraoauth.NewGoogle(cfg.OAuth)
+	if err != nil {
+		return nil, fmt.Errorf("app: google oauth provider: %w", err)
+	}
 	githubProvider := infraoauth.NewGitHub(cfg.OAuth)
 
-	if !googleProvider.IsConfigured() {
-		log.Warn().Msg("app: GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET not set — Google OAuth disabled")
-	}
+	log.Info().
+		Str("provider", string(googleProvider.Name())).
+		Str("redirect_url", cfg.OAuth.GoogleRedirectURL).
+		Msg("app: OAuth provider registered")
 	if !githubProvider.IsConfigured() {
-		log.Warn().Msg("app: GITHUB_CLIENT_ID / GITHUB_CLIENT_SECRET not set — GitHub OAuth disabled")
+		log.Warn().Msg("app: GitHub OAuth disabled; GITHUB_CLIENT_ID, GITHUB_CLIENT_SECRET, or GITHUB_REDIRECT_URL is not set")
+	} else {
+		log.Info().
+			Str("provider", string(githubProvider.Name())).
+			Str("redirect_url", cfg.OAuth.GitHubRedirectURL).
+			Msg("app: OAuth provider registered")
 	}
 
 	// Handlers

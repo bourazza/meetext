@@ -1,6 +1,12 @@
 package config
 
-import "time"
+import (
+	"fmt"
+	"net/url"
+	"sort"
+	"strings"
+	"time"
+)
 
 type Config struct {
 	App     AppConfig
@@ -44,13 +50,13 @@ type JWTConfig struct {
 }
 
 type OAuthConfig struct {
-	GoogleClientID      string `mapstructure:"GOOGLE_CLIENT_ID"`
-	GoogleClientSecret  string `mapstructure:"GOOGLE_CLIENT_SECRET"`
-	GoogleRedirectURL   string `mapstructure:"GOOGLE_REDIRECT_URL"`
-	GitHubClientID      string `mapstructure:"GITHUB_CLIENT_ID"`
-	GitHubClientSecret  string `mapstructure:"GITHUB_CLIENT_SECRET"`
-	GitHubRedirectURL   string `mapstructure:"GITHUB_REDIRECT_URL"`
-	StateSecret         string `mapstructure:"OAUTH_STATE_SECRET"`
+	GoogleClientID     string `mapstructure:"GOOGLE_CLIENT_ID"`
+	GoogleClientSecret string `mapstructure:"GOOGLE_CLIENT_SECRET"`
+	GoogleRedirectURL  string `mapstructure:"GOOGLE_REDIRECT_URL"`
+	GitHubClientID     string `mapstructure:"GITHUB_CLIENT_ID"`
+	GitHubClientSecret string `mapstructure:"GITHUB_CLIENT_SECRET"`
+	GitHubRedirectURL  string `mapstructure:"GITHUB_REDIRECT_URL"`
+	StateSecret        string `mapstructure:"OAUTH_STATE_SECRET"`
 }
 
 type StorageConfig struct {
@@ -80,4 +86,72 @@ type LogConfig struct {
 	Pretty    bool   `mapstructure:"LOG_PRETTY"`
 	File      string `mapstructure:"LOG_FILE"`
 	MaxSizeMB int    `mapstructure:"LOG_MAX_SIZE_MB"`
+}
+
+func (c *Config) ValidateAPI() error {
+	var missing []string
+
+	required := map[string]string{
+		"DATABASE_URL":         c.DB.DSN,
+		"JWT_ACCESS_SECRET":    c.JWT.AccessSecret,
+		"JWT_REFRESH_SECRET":   c.JWT.RefreshSecret,
+		"GOOGLE_CLIENT_ID":     c.OAuth.GoogleClientID,
+		"GOOGLE_CLIENT_SECRET": c.OAuth.GoogleClientSecret,
+		"GOOGLE_REDIRECT_URL":  c.OAuth.GoogleRedirectURL,
+		"OAUTH_STATE_SECRET":   c.OAuth.StateSecret,
+	}
+
+	for key, value := range required {
+		if strings.TrimSpace(value) == "" {
+			missing = append(missing, key)
+		}
+	}
+	if len(missing) > 0 {
+		sort.Strings(missing)
+		return fmt.Errorf("missing required environment variables: %s", strings.Join(missing, ", "))
+	}
+
+	if err := validateURL("FRONTEND_URL", c.App.FrontendURL); err != nil {
+		return err
+	}
+	if err := validateURL("GOOGLE_REDIRECT_URL", c.OAuth.GoogleRedirectURL); err != nil {
+		return err
+	}
+	if len(c.OAuth.StateSecret) < 32 {
+		return fmt.Errorf("OAUTH_STATE_SECRET must be at least 32 characters")
+	}
+	if len(c.JWT.AccessSecret) < 32 {
+		return fmt.Errorf("JWT_ACCESS_SECRET must be at least 32 characters")
+	}
+	if len(c.JWT.RefreshSecret) < 32 {
+		return fmt.Errorf("JWT_REFRESH_SECRET must be at least 32 characters")
+	}
+
+	return nil
+}
+
+func (c OAuthConfig) GoogleConfigured() bool {
+	return strings.TrimSpace(c.GoogleClientID) != "" &&
+		strings.TrimSpace(c.GoogleClientSecret) != "" &&
+		strings.TrimSpace(c.GoogleRedirectURL) != ""
+}
+
+func (c OAuthConfig) GitHubConfigured() bool {
+	return strings.TrimSpace(c.GitHubClientID) != "" &&
+		strings.TrimSpace(c.GitHubClientSecret) != "" &&
+		strings.TrimSpace(c.GitHubRedirectURL) != ""
+}
+
+func validateURL(key, raw string) error {
+	u, err := url.ParseRequestURI(raw)
+	if err != nil {
+		return fmt.Errorf("%s must be a valid URL: %w", key, err)
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return fmt.Errorf("%s must use http or https", key)
+	}
+	if u.Host == "" {
+		return fmt.Errorf("%s must include a host", key)
+	}
+	return nil
 }

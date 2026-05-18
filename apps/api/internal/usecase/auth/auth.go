@@ -2,14 +2,21 @@ package auth
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
 	"fmt"
+	"net/url"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
+	authdomain "github.com/meetext/backend/internal/domain/auth"
 	"github.com/meetext/backend/internal/domain/user"
 	"github.com/meetext/backend/internal/domain/workspace"
 	infraauth "github.com/meetext/backend/internal/infrastructure/auth"
+	"github.com/meetext/backend/internal/infrastructure/email"
 	infraoauth "github.com/meetext/backend/internal/infrastructure/oauth"
 	"github.com/meetext/backend/internal/infrastructure/password"
 	"github.com/meetext/backend/pkg/apperr"
@@ -19,12 +26,29 @@ type RegisterInput struct {
 	FullName      string `json:"full_name"      validate:"required,min=2,max=100"`
 	Email         string `json:"email"          validate:"required,email"`
 	Password      string `json:"password"       validate:"required,min=8"`
-	WorkspaceName string `json:"workspace_name" validate:"required,min=2,max=100"`
+	WorkspaceName string `json:"workspace_name" validate:"omitempty,min=2,max=100"`
 }
 
 type LoginInput struct {
 	Email    string `json:"email"    validate:"required,email"`
 	Password string `json:"password" validate:"required"`
+}
+
+type ForgotPasswordInput struct {
+	Email string `json:"email" validate:"required,email"`
+}
+
+type ResetPasswordInput struct {
+	Token    string `json:"token"    validate:"required"`
+	Password string `json:"password" validate:"required,min=8"`
+}
+
+type VerifyEmailInput struct {
+	Token string `json:"token" validate:"required"`
+}
+
+type ResendVerificationInput struct {
+	Email string `json:"email" validate:"required,email"`
 }
 
 type AuthResponse struct {
@@ -37,18 +61,34 @@ type AuthResponse struct {
 type UseCase struct {
 	userRepo      user.Repository
 	workspaceRepo workspace.Repository
+	tokenRepo     authdomain.TokenRepository
 	jwt           *infraauth.JWTService
+	email         email.Service
+	frontendURL   string
 }
 
 func NewUseCase(
 	userRepo user.Repository,
 	workspaceRepo workspace.Repository,
+	tokenRepo authdomain.TokenRepository,
 	jwt *infraauth.JWTService,
+	email email.Service,
+	frontendURL string,
 ) *UseCase {
-	return &UseCase{userRepo: userRepo, workspaceRepo: workspaceRepo, jwt: jwt}
+	return &UseCase{
+		userRepo:      userRepo,
+		workspaceRepo: workspaceRepo,
+		tokenRepo:     tokenRepo,
+		jwt:           jwt,
+		email:         email,
+		frontendURL:   strings.TrimRight(frontendURL, "/"),
+	}
 }
 
 func (uc *UseCase) Register(ctx context.Context, in RegisterInput) (*AuthResponse, error) {
+	in.Email = strings.ToLower(strings.TrimSpace(in.Email))
+	in.FullName = strings.TrimSpace(in.FullName)
+
 	existing, err := uc.userRepo.GetByEmail(ctx, in.Email)
 	if existing != nil {
 		return nil, apperr.ErrConflict
@@ -77,8 +117,16 @@ func (uc *UseCase) Register(ctx context.Context, in RegisterInput) (*AuthRespons
 		return nil, fmt.Errorf("auth: create user: %w", err)
 	}
 
-	ws, err := uc.createWorkspace(ctx, u.ID, in.WorkspaceName, now)
+	workspaceName := strings.TrimSpace(in.WorkspaceName)
+	if workspaceName == "" {
+		workspaceName = derivedWorkspaceName(in.FullName)
+	}
+	ws, err := uc.createWorkspace(ctx, u.ID, workspaceName, now)
 	if err != nil {
+		return nil, err
+	}
+
+	if err := uc.issueVerificationEmail(ctx, u); err != nil {
 		return nil, err
 	}
 
@@ -90,6 +138,8 @@ func (uc *UseCase) Register(ctx context.Context, in RegisterInput) (*AuthRespons
 }
 
 func (uc *UseCase) Login(ctx context.Context, in LoginInput) (*AuthResponse, error) {
+	in.Email = strings.ToLower(strings.TrimSpace(in.Email))
+
 	u, err := uc.userRepo.GetByEmail(ctx, in.Email)
 	if err != nil {
 		return nil, apperr.ErrInvalidCredentials
@@ -105,6 +155,9 @@ func (uc *UseCase) Login(ctx context.Context, in LoginInput) (*AuthResponse, err
 	if err != nil {
 		return nil, fmt.Errorf("auth: issue tokens: %w", err)
 	}
+	now := time.Now()
+	_ = uc.userRepo.RecordLogin(ctx, u.ID, now)
+	u.LastLoginAt = &now
 	return &AuthResponse{User: u, AccessToken: tokens.AccessToken, RefreshToken: tokens.RefreshToken}, nil
 }
 
@@ -117,6 +170,103 @@ func (uc *UseCase) RefreshToken(ctx context.Context, refreshToken string) (*infr
 		return nil, apperr.ErrUnauthorized
 	}
 	return uc.jwt.IssueTokenPair(claims.UserID)
+}
+
+func (uc *UseCase) CurrentUser(ctx context.Context, userID uuid.UUID) (*user.User, error) {
+	u, err := uc.userRepo.GetByID(ctx, userID)
+	if err != nil {
+		return nil, apperr.ErrUnauthorized
+	}
+	return u, nil
+}
+
+func (uc *UseCase) RequestPasswordReset(ctx context.Context, in ForgotPasswordInput) error {
+	emailAddress := strings.ToLower(strings.TrimSpace(in.Email))
+	u, err := uc.userRepo.GetByEmail(ctx, emailAddress)
+	if err != nil {
+		if err == apperr.ErrNotFound {
+			return nil
+		}
+		return fmt.Errorf("auth: password reset lookup: %w", err)
+	}
+
+	raw, hashed, err := newToken()
+	if err != nil {
+		return fmt.Errorf("auth: password reset token: %w", err)
+	}
+	now := time.Now()
+	if err := uc.tokenRepo.DeletePasswordResetTokensForUser(ctx, u.ID); err != nil {
+		return err
+	}
+	if err := uc.tokenRepo.CreatePasswordResetToken(ctx, &authdomain.PasswordResetToken{
+		ID:        uuid.New(),
+		UserID:    u.ID,
+		TokenHash: hashed,
+		ExpiresAt: now.Add(30 * time.Minute),
+		CreatedAt: now,
+	}); err != nil {
+		return err
+	}
+
+	return uc.email.SendPasswordReset(ctx, u.Email, u.FullName, uc.frontendLink("/reset-password", raw))
+}
+
+func (uc *UseCase) ResetPassword(ctx context.Context, in ResetPasswordInput) error {
+	hashed := hashToken(in.Token)
+	token, err := uc.tokenRepo.GetPasswordResetToken(ctx, hashed)
+	if err != nil {
+		return apperr.New(400, "INVALID_RESET_TOKEN", "This password reset link is invalid or expired")
+	}
+	now := time.Now()
+	if token.UsedAt != nil || now.After(token.ExpiresAt) {
+		return apperr.New(400, "INVALID_RESET_TOKEN", "This password reset link is invalid or expired")
+	}
+
+	passwordHash, err := password.Hash(in.Password)
+	if err != nil {
+		return fmt.Errorf("auth: hash reset password: %w", err)
+	}
+	if err := uc.userRepo.UpdatePassword(ctx, token.UserID, passwordHash, now); err != nil {
+		return err
+	}
+	if err := uc.tokenRepo.MarkPasswordResetTokenUsed(ctx, token.ID, now); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (uc *UseCase) VerifyEmail(ctx context.Context, in VerifyEmailInput) error {
+	hashed := hashToken(in.Token)
+	token, err := uc.tokenRepo.GetVerificationToken(ctx, hashed)
+	if err != nil {
+		return apperr.New(400, "INVALID_VERIFICATION_TOKEN", "This verification link is invalid or expired")
+	}
+	now := time.Now()
+	if token.UsedAt != nil || now.After(token.ExpiresAt) {
+		return apperr.New(400, "INVALID_VERIFICATION_TOKEN", "This verification link is invalid or expired")
+	}
+	if err := uc.userRepo.MarkEmailVerified(ctx, token.UserID, now); err != nil {
+		return err
+	}
+	if err := uc.tokenRepo.MarkVerificationTokenUsed(ctx, token.ID, now); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (uc *UseCase) ResendVerification(ctx context.Context, in ResendVerificationInput) error {
+	emailAddress := strings.ToLower(strings.TrimSpace(in.Email))
+	u, err := uc.userRepo.GetByEmail(ctx, emailAddress)
+	if err != nil {
+		if err == apperr.ErrNotFound {
+			return nil
+		}
+		return fmt.Errorf("auth: resend verification lookup: %w", err)
+	}
+	if u.EmailVerifiedAt != nil {
+		return nil
+	}
+	return uc.issueVerificationEmail(ctx, u)
 }
 
 // OAuthLogin finds or creates a user from an OAuth provider profile, then issues a JWT pair.
@@ -149,6 +299,8 @@ func (uc *UseCase) OAuthLogin(ctx context.Context, provider user.Provider, info 
 			if u.AvatarURL == nil && info.AvatarURL != "" {
 				u.AvatarURL = &info.AvatarURL
 			}
+			now := time.Now()
+			u.EmailVerifiedAt = &now
 			if err := uc.userRepo.Update(ctx, u); err != nil {
 				return nil, fmt.Errorf("auth: oauth update user: %w", err)
 			}
@@ -166,6 +318,9 @@ func (uc *UseCase) OAuthLogin(ctx context.Context, provider user.Provider, info 
 	if err != nil {
 		return nil, fmt.Errorf("auth: issue tokens: %w", err)
 	}
+	now := time.Now()
+	_ = uc.userRepo.RecordLogin(ctx, u.ID, now)
+	u.LastLoginAt = &now
 	return &AuthResponse{User: u, Workspace: ws, AccessToken: tokens.AccessToken, RefreshToken: tokens.RefreshToken}, nil
 }
 
@@ -179,15 +334,16 @@ func (uc *UseCase) createOAuthUser(ctx context.Context, provider user.Provider, 
 	}
 
 	u := &user.User{
-		ID:         uuid.New(),
-		FullName:   info.Name,
-		Email:      info.Email,
-		AvatarURL:  avatarURL,
-		Plan:       user.PlanFree,
-		Provider:   provider,
-		ProviderID: &pid,
-		CreatedAt:  now,
-		UpdatedAt:  now,
+		ID:              uuid.New(),
+		FullName:        info.Name,
+		Email:           strings.ToLower(strings.TrimSpace(info.Email)),
+		AvatarURL:       avatarURL,
+		Plan:            user.PlanFree,
+		Provider:        provider,
+		ProviderID:      &pid,
+		EmailVerifiedAt: &now,
+		CreatedAt:       now,
+		UpdatedAt:       now,
 	}
 	if err := uc.userRepo.Create(ctx, u); err != nil {
 		return nil, fmt.Errorf("auth: create oauth user: %w", err)
@@ -199,6 +355,52 @@ func (uc *UseCase) createOAuthUser(ctx context.Context, provider user.Provider, 
 		return nil, err
 	}
 	return u, nil
+}
+
+func (uc *UseCase) issueVerificationEmail(ctx context.Context, u *user.User) error {
+	raw, hashed, err := newToken()
+	if err != nil {
+		return fmt.Errorf("auth: verification token: %w", err)
+	}
+	now := time.Now()
+	if err := uc.tokenRepo.DeleteVerificationTokensForUser(ctx, u.ID); err != nil {
+		return err
+	}
+	if err := uc.tokenRepo.CreateVerificationToken(ctx, &authdomain.VerificationToken{
+		ID:        uuid.New(),
+		UserID:    u.ID,
+		TokenHash: hashed,
+		ExpiresAt: now.Add(24 * time.Hour),
+		CreatedAt: now,
+	}); err != nil {
+		return err
+	}
+	return uc.email.SendVerification(ctx, u.Email, u.FullName, uc.frontendLink("/verify-email", raw))
+}
+
+func (uc *UseCase) frontendLink(path string, token string) string {
+	u, err := url.Parse(uc.frontendURL + path)
+	if err != nil {
+		return uc.frontendURL + path + "?token=" + url.QueryEscape(token)
+	}
+	q := u.Query()
+	q.Set("token", token)
+	u.RawQuery = q.Encode()
+	return u.String()
+}
+
+func newToken() (raw string, hashed string, err error) {
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		return "", "", err
+	}
+	raw = base64.RawURLEncoding.EncodeToString(b)
+	return raw, hashToken(raw), nil
+}
+
+func hashToken(raw string) string {
+	sum := sha256.Sum256([]byte(raw))
+	return hex.EncodeToString(sum[:])
 }
 
 func (uc *UseCase) createWorkspace(ctx context.Context, ownerID uuid.UUID, name string, now time.Time) (*workspace.Workspace, error) {

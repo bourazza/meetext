@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -22,11 +23,12 @@ func NewUserRepository(db *pgxpool.Pool) *UserRepository {
 
 func (r *UserRepository) Create(ctx context.Context, u *user.User) error {
 	q := `INSERT INTO users
-		  (id, full_name, email, password_hash, avatar_url, plan, provider, provider_id, created_at, updated_at)
-		  VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`
+		  (id, full_name, email, password_hash, avatar_url, plan, provider, provider_id, email_verified_at, last_login_at, created_at, updated_at)
+		  VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`
 	_, err := r.db.Exec(ctx, q,
 		u.ID, u.FullName, u.Email, nullableString(u.PasswordHash),
 		u.AvatarURL, u.Plan, u.Provider, u.ProviderID,
+		u.EmailVerifiedAt, u.LastLoginAt,
 		u.CreatedAt, u.UpdatedAt,
 	)
 	if err != nil {
@@ -40,30 +42,72 @@ func (r *UserRepository) Create(ctx context.Context, u *user.User) error {
 
 func (r *UserRepository) GetByID(ctx context.Context, id uuid.UUID) (*user.User, error) {
 	q := `SELECT id, full_name, email, COALESCE(password_hash,''), avatar_url, plan,
-		         provider, provider_id, created_at, updated_at
+		         provider, provider_id, email_verified_at, last_login_at, created_at, updated_at
 		  FROM users WHERE id=$1`
 	return r.scanOne(r.db.QueryRow(ctx, q, id))
 }
 
 func (r *UserRepository) GetByEmail(ctx context.Context, email string) (*user.User, error) {
 	q := `SELECT id, full_name, email, COALESCE(password_hash,''), avatar_url, plan,
-		         provider, provider_id, created_at, updated_at
+		         provider, provider_id, email_verified_at, last_login_at, created_at, updated_at
 		  FROM users WHERE email=$1`
 	return r.scanOne(r.db.QueryRow(ctx, q, email))
 }
 
 func (r *UserRepository) GetByProviderID(ctx context.Context, provider user.Provider, providerID string) (*user.User, error) {
 	q := `SELECT id, full_name, email, COALESCE(password_hash,''), avatar_url, plan,
-		         provider, provider_id, created_at, updated_at
+		         provider, provider_id, email_verified_at, last_login_at, created_at, updated_at
 		  FROM users WHERE provider=$1 AND provider_id=$2`
 	return r.scanOne(r.db.QueryRow(ctx, q, provider, providerID))
 }
 
 func (r *UserRepository) Update(ctx context.Context, u *user.User) error {
-	q := `UPDATE users SET full_name=$1, avatar_url=$2, provider=$3, provider_id=$4, updated_at=$5 WHERE id=$6`
-	tag, err := r.db.Exec(ctx, q, u.FullName, u.AvatarURL, u.Provider, u.ProviderID, u.UpdatedAt, u.ID)
+	q := `UPDATE users
+	      SET full_name=$1, avatar_url=$2, provider=$3, provider_id=$4,
+	          email_verified_at=$5, last_login_at=$6, updated_at=$7
+	      WHERE id=$8`
+	tag, err := r.db.Exec(ctx, q,
+		u.FullName, u.AvatarURL, u.Provider, u.ProviderID,
+		u.EmailVerifiedAt, u.LastLoginAt, u.UpdatedAt, u.ID,
+	)
 	if err != nil {
 		return fmt.Errorf("user repo: update: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return apperr.ErrNotFound
+	}
+	return nil
+}
+
+func (r *UserRepository) MarkEmailVerified(ctx context.Context, id uuid.UUID, verifiedAt time.Time) error {
+	q := `UPDATE users SET email_verified_at=$1, updated_at=$1 WHERE id=$2`
+	tag, err := r.db.Exec(ctx, q, verifiedAt, id)
+	if err != nil {
+		return fmt.Errorf("user repo: mark email verified: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return apperr.ErrNotFound
+	}
+	return nil
+}
+
+func (r *UserRepository) UpdatePassword(ctx context.Context, id uuid.UUID, passwordHash string, updatedAt time.Time) error {
+	q := `UPDATE users SET password_hash=$1, provider=$2, updated_at=$3 WHERE id=$4`
+	tag, err := r.db.Exec(ctx, q, passwordHash, user.ProviderLocal, updatedAt, id)
+	if err != nil {
+		return fmt.Errorf("user repo: update password: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return apperr.ErrNotFound
+	}
+	return nil
+}
+
+func (r *UserRepository) RecordLogin(ctx context.Context, id uuid.UUID, loggedInAt time.Time) error {
+	q := `UPDATE users SET last_login_at=$1 WHERE id=$2`
+	tag, err := r.db.Exec(ctx, q, loggedInAt, id)
+	if err != nil {
+		return fmt.Errorf("user repo: record login: %w", err)
 	}
 	if tag.RowsAffected() == 0 {
 		return apperr.ErrNotFound
@@ -88,6 +132,7 @@ func (r *UserRepository) scanOne(row pgx.Row) (*user.User, error) {
 	err := row.Scan(
 		&u.ID, &u.FullName, &u.Email, &u.PasswordHash,
 		&u.AvatarURL, &u.Plan, &u.Provider, &u.ProviderID,
+		&u.EmailVerifiedAt, &u.LastLoginAt,
 		&u.CreatedAt, &u.UpdatedAt,
 	)
 	if err != nil {

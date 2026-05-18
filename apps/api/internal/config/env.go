@@ -11,16 +11,22 @@ import (
 func Load(path string) (*Config, error) {
 	v := viper.New()
 
-	v.SetConfigFile(path)
-	v.SetConfigType("env")
+	if path != "" {
+		v.SetConfigFile(path)
+		v.SetConfigType("env")
+	}
+	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
 	v.AutomaticEnv()
+	bindEnv(v)
 
 	setDefaults(v)
 
-	if err := v.ReadInConfig(); err != nil {
-		if _, ok := err.(viper.ConfigFileNotFoundError); !ok {
-			if !strings.Contains(err.Error(), "no such file") {
-				return nil, fmt.Errorf("config: read error: %w", err)
+	if path != "" {
+		if err := v.ReadInConfig(); err != nil {
+			if _, ok := err.(viper.ConfigFileNotFoundError); !ok {
+				if !strings.Contains(err.Error(), "no such file") {
+					return nil, fmt.Errorf("config: read error: %w", err)
+				}
 			}
 		}
 	}
@@ -98,6 +104,56 @@ func Load(path string) (*Config, error) {
 	return cfg, nil
 }
 
+func bindEnv(v *viper.Viper) {
+	keys := []string{
+		"APP_NAME",
+		"APP_ENV",
+		"APP_VERSION",
+		"FRONTEND_URL",
+		"HTTP_HOST",
+		"HTTP_PORT",
+		"HTTP_READ_TIMEOUT",
+		"HTTP_WRITE_TIMEOUT",
+		"HTTP_IDLE_TIMEOUT",
+		"DATABASE_URL",
+		"DB_MAX_OPEN_CONNS",
+		"DB_MAX_IDLE_CONNS",
+		"DB_MAX_LIFETIME",
+		"JWT_ACCESS_SECRET",
+		"JWT_REFRESH_SECRET",
+		"JWT_ACCESS_TTL",
+		"JWT_REFRESH_TTL",
+		"GOOGLE_CLIENT_ID",
+		"GOOGLE_CLIENT_SECRET",
+		"GOOGLE_REDIRECT_URL",
+		"GITHUB_CLIENT_ID",
+		"GITHUB_CLIENT_SECRET",
+		"GITHUB_REDIRECT_URL",
+		"OAUTH_STATE_SECRET",
+		"STORAGE_PROVIDER",
+		"STORAGE_LOCAL_PATH",
+		"STORAGE_BUCKET",
+		"STORAGE_REGION",
+		"STORAGE_ACCESS_KEY",
+		"STORAGE_SECRET_KEY",
+		"STORAGE_ENDPOINT",
+		"REDIS_ADDR",
+		"REDIS_PASSWORD",
+		"REDIS_DB",
+		"OLLAMA_URL",
+		"OLLAMA_MODEL",
+		"WHISPER_URL",
+		"LOG_LEVEL",
+		"LOG_PRETTY",
+		"LOG_FILE",
+		"LOG_MAX_SIZE_MB",
+	}
+
+	for _, key := range keys {
+		_ = v.BindEnv(key)
+	}
+}
+
 func setDefaults(v *viper.Viper) {
 	v.SetDefault("APP_NAME", "meetext")
 	v.SetDefault("APP_ENV", "development")
@@ -117,9 +173,7 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("JWT_ACCESS_TTL", 15*time.Minute)
 	v.SetDefault("JWT_REFRESH_TTL", 7*24*time.Hour)
 
-	v.SetDefault("GOOGLE_REDIRECT_URL", "http://localhost:8080/api/v1/auth/oauth/google/callback")
 	v.SetDefault("GITHUB_REDIRECT_URL", "http://localhost:8080/api/v1/auth/oauth/github/callback")
-	v.SetDefault("OAUTH_STATE_SECRET", "change-me-oauth-state-secret")
 
 	v.SetDefault("STORAGE_PROVIDER", "local")
 	v.SetDefault("STORAGE_LOCAL_PATH", "./uploads")

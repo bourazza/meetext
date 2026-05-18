@@ -49,6 +49,11 @@ func New(log zerolog.Logger, jwt *infraauth.JWTService, frontendURL string, h Ha
 			r.Post("/register", h.Auth.Register)
 			r.Post("/login", h.Auth.Login)
 			r.Post("/refresh", h.Auth.Refresh)
+			r.Post("/logout", h.Auth.Logout)
+			r.Post("/forgot-password", h.Auth.ForgotPassword)
+			r.Post("/reset-password", h.Auth.ResetPassword)
+			r.Post("/verify-email", h.Auth.VerifyEmail)
+			r.Post("/resend-verification", h.Auth.ResendVerification)
 
 			// OAuth — Google
 			r.Get("/oauth/google", h.OAuthGoogle.Redirect)
@@ -62,6 +67,8 @@ func New(log zerolog.Logger, jwt *infraauth.JWTService, frontendURL string, h Ha
 		// Protected routes
 		r.Group(func(r chi.Router) {
 			r.Use(httpmiddleware.Auth(jwt))
+
+			r.Get("/auth/me", h.Auth.Me)
 
 			r.Route("/workspaces", func(r chi.Router) {
 				r.Get("/", h.Workspace.List)
