@@ -2,6 +2,9 @@
 apps/api/logs/
 *.log
 
+# PIDs
+.pids/
+
 # Uploads
 apps/api/uploads/
 
@@ -11,11 +14,21 @@ apps/api/tmp/
 
 # Environment
 .env
+.env.*
+!.env.example
 apps/api/.env
+apps/web/.env.local
 
 # Go
 *.test
 coverage.out
+
+# Node / Next.js
+node_modules/
+apps/**/node_modules/
+.next/
+apps/**/.next/
+*.tsbuildinfo
 
 # OS
 .DS_Store

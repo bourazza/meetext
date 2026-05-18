@@ -22,6 +22,20 @@ services:
     volumes:
       - uploads:/app/uploads
 
+  web:
+    build:
+      context: ./apps/web
+      dockerfile: Dockerfile
+    container_name: meetext_web
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      API_URL: http://api:8080
+      NEXT_PUBLIC_APP_URL: http://localhost:3000
+    depends_on:
+      - api
+
   postgres:
     image: postgres:16-alpine
     container_name: meetext_postgres

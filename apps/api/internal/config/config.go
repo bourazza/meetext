@@ -3,14 +3,15 @@ package config
 import "time"
 
 type Config struct {
-	App      AppConfig
-	HTTP     HTTPConfig
-	DB       DBConfig
-	JWT      JWTConfig
-	Storage  StorageConfig
-	Redis    RedisConfig
-	AI       AIConfig
-	Log      LogConfig
+	App     AppConfig
+	HTTP    HTTPConfig
+	DB      DBConfig
+	JWT     JWTConfig
+	OAuth   OAuthConfig
+	Storage StorageConfig
+	Redis   RedisConfig
+	AI      AIConfig
+	Log     LogConfig
 }
 
 type AppConfig struct {
@@ -29,9 +30,9 @@ type HTTPConfig struct {
 }
 
 type DBConfig struct {
-	DSN          string `mapstructure:"DATABASE_URL"`
-	MaxOpenConns int    `mapstructure:"DB_MAX_OPEN_CONNS"`
-	MaxIdleConns int    `mapstructure:"DB_MAX_IDLE_CONNS"`
+	DSN          string        `mapstructure:"DATABASE_URL"`
+	MaxOpenConns int           `mapstructure:"DB_MAX_OPEN_CONNS"`
+	MaxIdleConns int           `mapstructure:"DB_MAX_IDLE_CONNS"`
 	MaxLifetime  time.Duration `mapstructure:"DB_MAX_LIFETIME"`
 }
 
@@ -42,8 +43,18 @@ type JWTConfig struct {
 	RefreshTTL    time.Duration `mapstructure:"JWT_REFRESH_TTL"`
 }
 
+type OAuthConfig struct {
+	GoogleClientID      string `mapstructure:"GOOGLE_CLIENT_ID"`
+	GoogleClientSecret  string `mapstructure:"GOOGLE_CLIENT_SECRET"`
+	GoogleRedirectURL   string `mapstructure:"GOOGLE_REDIRECT_URL"`
+	GitHubClientID      string `mapstructure:"GITHUB_CLIENT_ID"`
+	GitHubClientSecret  string `mapstructure:"GITHUB_CLIENT_SECRET"`
+	GitHubRedirectURL   string `mapstructure:"GITHUB_REDIRECT_URL"`
+	StateSecret         string `mapstructure:"OAUTH_STATE_SECRET"`
+}
+
 type StorageConfig struct {
-	Provider  string `mapstructure:"STORAGE_PROVIDER"` // local | s3 | supabase
+	Provider  string `mapstructure:"STORAGE_PROVIDER"`
 	LocalPath string `mapstructure:"STORAGE_LOCAL_PATH"`
 	Bucket    string `mapstructure:"STORAGE_BUCKET"`
 	Region    string `mapstructure:"STORAGE_REGION"`
@@ -59,14 +70,14 @@ type RedisConfig struct {
 }
 
 type AIConfig struct {
-	OllamaURL    string `mapstructure:"OLLAMA_URL"`
-	OllamaModel  string `mapstructure:"OLLAMA_MODEL"`
-	WhisperURL   string `mapstructure:"WHISPER_URL"`
+	OllamaURL   string `mapstructure:"OLLAMA_URL"`
+	OllamaModel string `mapstructure:"OLLAMA_MODEL"`
+	WhisperURL  string `mapstructure:"WHISPER_URL"`
 }
 
 type LogConfig struct {
-	Level      string `mapstructure:"LOG_LEVEL"`
-	Pretty     bool   `mapstructure:"LOG_PRETTY"`
-	File       string `mapstructure:"LOG_FILE"`
-	MaxSizeMB  int    `mapstructure:"LOG_MAX_SIZE_MB"`
+	Level     string `mapstructure:"LOG_LEVEL"`
+	Pretty    bool   `mapstructure:"LOG_PRETTY"`
+	File      string `mapstructure:"LOG_FILE"`
+	MaxSizeMB int    `mapstructure:"LOG_MAX_SIZE_MB"`
 }

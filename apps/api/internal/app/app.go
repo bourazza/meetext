@@ -14,6 +14,7 @@ import (
 	"github.com/meetext/backend/internal/delivery/http/router"
 	infraauth "github.com/meetext/backend/internal/infrastructure/auth"
 	"github.com/meetext/backend/internal/infrastructure/db"
+	infraoauth "github.com/meetext/backend/internal/infrastructure/oauth"
 	"github.com/meetext/backend/internal/infrastructure/storage"
 	"github.com/meetext/backend/internal/repository/postgres"
 	ucauth "github.com/meetext/backend/internal/usecase/auth"
@@ -54,11 +55,24 @@ func New(cfg *config.Config, log zerolog.Logger) (*App, error) {
 	workspaceUC := ucworkspace.NewUseCase(workspaceRepo)
 	meetingUC := ucmeeting.NewUseCase(meetingRepo, store)
 
+	// OAuth providers
+	googleProvider := infraoauth.NewGoogle(cfg.OAuth)
+	githubProvider := infraoauth.NewGitHub(cfg.OAuth)
+
+	if !googleProvider.IsConfigured() {
+		log.Warn().Msg("app: GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET not set — Google OAuth disabled")
+	}
+	if !githubProvider.IsConfigured() {
+		log.Warn().Msg("app: GITHUB_CLIENT_ID / GITHUB_CLIENT_SECRET not set — GitHub OAuth disabled")
+	}
+
 	// Handlers
 	handlers := router.Handlers{
-		Auth:      handler.NewAuthHandler(authUC),
-		Workspace: handler.NewWorkspaceHandler(workspaceUC),
-		Meeting:   handler.NewMeetingHandler(meetingUC),
+		Auth:        handler.NewAuthHandler(authUC),
+		OAuthGoogle: handler.NewOAuthHandler(googleProvider, authUC, cfg.App.FrontendURL, log),
+		OAuthGitHub: handler.NewOAuthHandler(githubProvider, authUC, cfg.App.FrontendURL, log),
+		Workspace:   handler.NewWorkspaceHandler(workspaceUC),
+		Meeting:     handler.NewMeetingHandler(meetingUC),
 	}
 
 	httpHandler := router.New(log, jwtSvc, cfg.App.FrontendURL, handlers)

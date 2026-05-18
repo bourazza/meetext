@@ -21,11 +21,13 @@ func NewUserRepository(db *pgxpool.Pool) *UserRepository {
 }
 
 func (r *UserRepository) Create(ctx context.Context, u *user.User) error {
-	q := `INSERT INTO users (id, full_name, email, password_hash, avatar_url, plan, created_at, updated_at)
-		  VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`
+	q := `INSERT INTO users
+		  (id, full_name, email, password_hash, avatar_url, plan, provider, provider_id, created_at, updated_at)
+		  VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`
 	_, err := r.db.Exec(ctx, q,
-		u.ID, u.FullName, u.Email, u.PasswordHash,
-		u.AvatarURL, u.Plan, u.CreatedAt, u.UpdatedAt,
+		u.ID, u.FullName, u.Email, nullableString(u.PasswordHash),
+		u.AvatarURL, u.Plan, u.Provider, u.ProviderID,
+		u.CreatedAt, u.UpdatedAt,
 	)
 	if err != nil {
 		if isDuplicateKey(err) {
@@ -37,42 +39,29 @@ func (r *UserRepository) Create(ctx context.Context, u *user.User) error {
 }
 
 func (r *UserRepository) GetByID(ctx context.Context, id uuid.UUID) (*user.User, error) {
-	q := `SELECT id, full_name, email, password_hash, avatar_url, plan, created_at, updated_at
-		  FROM users WHERE id = $1`
-	u := &user.User{}
-	err := r.db.QueryRow(ctx, q, id).Scan(
-		&u.ID, &u.FullName, &u.Email, &u.PasswordHash,
-		&u.AvatarURL, &u.Plan, &u.CreatedAt, &u.UpdatedAt,
-	)
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, apperr.ErrNotFound
-		}
-		return nil, fmt.Errorf("user repo: get by id: %w", err)
-	}
-	return u, nil
+	q := `SELECT id, full_name, email, COALESCE(password_hash,''), avatar_url, plan,
+		         provider, provider_id, created_at, updated_at
+		  FROM users WHERE id=$1`
+	return r.scanOne(r.db.QueryRow(ctx, q, id))
 }
 
 func (r *UserRepository) GetByEmail(ctx context.Context, email string) (*user.User, error) {
-	q := `SELECT id, full_name, email, password_hash, avatar_url, plan, created_at, updated_at
-		  FROM users WHERE email = $1`
-	u := &user.User{}
-	err := r.db.QueryRow(ctx, q, email).Scan(
-		&u.ID, &u.FullName, &u.Email, &u.PasswordHash,
-		&u.AvatarURL, &u.Plan, &u.CreatedAt, &u.UpdatedAt,
-	)
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, apperr.ErrNotFound
-		}
-		return nil, fmt.Errorf("user repo: get by email: %w", err)
-	}
-	return u, nil
+	q := `SELECT id, full_name, email, COALESCE(password_hash,''), avatar_url, plan,
+		         provider, provider_id, created_at, updated_at
+		  FROM users WHERE email=$1`
+	return r.scanOne(r.db.QueryRow(ctx, q, email))
+}
+
+func (r *UserRepository) GetByProviderID(ctx context.Context, provider user.Provider, providerID string) (*user.User, error) {
+	q := `SELECT id, full_name, email, COALESCE(password_hash,''), avatar_url, plan,
+		         provider, provider_id, created_at, updated_at
+		  FROM users WHERE provider=$1 AND provider_id=$2`
+	return r.scanOne(r.db.QueryRow(ctx, q, provider, providerID))
 }
 
 func (r *UserRepository) Update(ctx context.Context, u *user.User) error {
-	q := `UPDATE users SET full_name=$1, avatar_url=$2, updated_at=$3 WHERE id=$4`
-	tag, err := r.db.Exec(ctx, q, u.FullName, u.AvatarURL, u.UpdatedAt, u.ID)
+	q := `UPDATE users SET full_name=$1, avatar_url=$2, provider=$3, provider_id=$4, updated_at=$5 WHERE id=$6`
+	tag, err := r.db.Exec(ctx, q, u.FullName, u.AvatarURL, u.Provider, u.ProviderID, u.UpdatedAt, u.ID)
 	if err != nil {
 		return fmt.Errorf("user repo: update: %w", err)
 	}
@@ -83,7 +72,7 @@ func (r *UserRepository) Update(ctx context.Context, u *user.User) error {
 }
 
 func (r *UserRepository) Delete(ctx context.Context, id uuid.UUID) error {
-	q := `DELETE FROM users WHERE id = $1`
+	q := `DELETE FROM users WHERE id=$1`
 	tag, err := r.db.Exec(ctx, q, id)
 	if err != nil {
 		return fmt.Errorf("user repo: delete: %w", err)
@@ -92,4 +81,28 @@ func (r *UserRepository) Delete(ctx context.Context, id uuid.UUID) error {
 		return apperr.ErrNotFound
 	}
 	return nil
+}
+
+func (r *UserRepository) scanOne(row pgx.Row) (*user.User, error) {
+	u := &user.User{}
+	err := row.Scan(
+		&u.ID, &u.FullName, &u.Email, &u.PasswordHash,
+		&u.AvatarURL, &u.Plan, &u.Provider, &u.ProviderID,
+		&u.CreatedAt, &u.UpdatedAt,
+	)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, apperr.ErrNotFound
+		}
+		return nil, fmt.Errorf("user repo: scan: %w", err)
+	}
+	return u, nil
+}
+
+// nullableString returns nil for an empty string so password_hash stays NULL for OAuth users.
+func nullableString(s string) *string {
+	if s == "" {
+		return nil
+	}
+	return &s
 }

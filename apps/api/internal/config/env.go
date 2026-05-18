@@ -18,7 +18,6 @@ func Load(path string) (*Config, error) {
 	setDefaults(v)
 
 	if err := v.ReadInConfig(); err != nil {
-		// allow missing file in production (env vars only)
 		if _, ok := err.(viper.ConfigFileNotFoundError); !ok {
 			if !strings.Contains(err.Error(), "no such file") {
 				return nil, fmt.Errorf("config: read error: %w", err)
@@ -55,6 +54,16 @@ func Load(path string) (*Config, error) {
 		RefreshSecret: v.GetString("JWT_REFRESH_SECRET"),
 		AccessTTL:     v.GetDuration("JWT_ACCESS_TTL"),
 		RefreshTTL:    v.GetDuration("JWT_REFRESH_TTL"),
+	}
+
+	cfg.OAuth = OAuthConfig{
+		GoogleClientID:     v.GetString("GOOGLE_CLIENT_ID"),
+		GoogleClientSecret: v.GetString("GOOGLE_CLIENT_SECRET"),
+		GoogleRedirectURL:  v.GetString("GOOGLE_REDIRECT_URL"),
+		GitHubClientID:     v.GetString("GITHUB_CLIENT_ID"),
+		GitHubClientSecret: v.GetString("GITHUB_CLIENT_SECRET"),
+		GitHubRedirectURL:  v.GetString("GITHUB_REDIRECT_URL"),
+		StateSecret:        v.GetString("OAUTH_STATE_SECRET"),
 	}
 
 	cfg.Storage = StorageConfig{
@@ -107,6 +116,10 @@ func setDefaults(v *viper.Viper) {
 
 	v.SetDefault("JWT_ACCESS_TTL", 15*time.Minute)
 	v.SetDefault("JWT_REFRESH_TTL", 7*24*time.Hour)
+
+	v.SetDefault("GOOGLE_REDIRECT_URL", "http://localhost:8080/api/v1/auth/oauth/google/callback")
+	v.SetDefault("GITHUB_REDIRECT_URL", "http://localhost:8080/api/v1/auth/oauth/github/callback")
+	v.SetDefault("OAUTH_STATE_SECRET", "change-me-oauth-state-secret")
 
 	v.SetDefault("STORAGE_PROVIDER", "local")
 	v.SetDefault("STORAGE_LOCAL_PATH", "./uploads")

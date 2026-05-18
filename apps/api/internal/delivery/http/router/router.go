@@ -2,6 +2,7 @@ package router
 
 import (
 	"net/http"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	chimiddleware "github.com/go-chi/chi/v5/middleware"
@@ -12,19 +13,19 @@ import (
 	infraauth "github.com/meetext/backend/internal/infrastructure/auth"
 	"github.com/meetext/backend/pkg/response"
 	"github.com/rs/zerolog"
-	"time"
 )
 
 type Handlers struct {
-	Auth      *handler.AuthHandler
-	Workspace *handler.WorkspaceHandler
-	Meeting   *handler.MeetingHandler
+	Auth        *handler.AuthHandler
+	OAuthGoogle *handler.OAuthHandler
+	OAuthGitHub *handler.OAuthHandler
+	Workspace   *handler.WorkspaceHandler
+	Meeting     *handler.MeetingHandler
 }
 
 func New(log zerolog.Logger, jwt *infraauth.JWTService, frontendURL string, h Handlers) http.Handler {
 	r := chi.NewRouter()
 
-	// Global middleware
 	r.Use(chimiddleware.RequestID)
 	r.Use(chimiddleware.RealIP)
 	r.Use(httpmiddleware.Logger(log))
@@ -43,11 +44,19 @@ func New(log zerolog.Logger, jwt *infraauth.JWTService, frontendURL string, h Ha
 	})
 
 	r.Route("/api/v1", func(r chi.Router) {
-		// Public auth routes
 		r.Route("/auth", func(r chi.Router) {
+			// Password auth
 			r.Post("/register", h.Auth.Register)
 			r.Post("/login", h.Auth.Login)
 			r.Post("/refresh", h.Auth.Refresh)
+
+			// OAuth — Google
+			r.Get("/oauth/google", h.OAuthGoogle.Redirect)
+			r.Get("/oauth/google/callback", h.OAuthGoogle.Callback)
+
+			// OAuth — GitHub
+			r.Get("/oauth/github", h.OAuthGitHub.Redirect)
+			r.Get("/oauth/github/callback", h.OAuthGitHub.Callback)
 		})
 
 		// Protected routes
