@@ -45,6 +45,16 @@ func (m *mockUserRepo) GetByProviderID(ctx context.Context, provider user.Provid
 	}
 	return args.Get(0).(*user.User), args.Error(1)
 }
+func (m *mockUserRepo) GetByOAuthAccount(ctx context.Context, provider user.Provider, providerAccountID string) (*user.User, error) {
+	args := m.Called(ctx, provider, providerAccountID)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*user.User), args.Error(1)
+}
+func (m *mockUserRepo) UpsertOAuthAccount(ctx context.Context, account *user.OAuthAccount) error {
+	return m.Called(ctx, account).Error(0)
+}
 func (m *mockUserRepo) Update(ctx context.Context, u *user.User) error {
 	return m.Called(ctx, u).Error(0)
 }
@@ -94,6 +104,25 @@ func (m *mockTokenRepo) MarkPasswordResetTokenUsed(ctx context.Context, id uuid.
 }
 func (m *mockTokenRepo) DeletePasswordResetTokensForUser(ctx context.Context, userID uuid.UUID) error {
 	return m.Called(ctx, userID).Error(0)
+}
+func (m *mockTokenRepo) CreateSession(ctx context.Context, session *authdomain.Session) error {
+	return m.Called(ctx, session).Error(0)
+}
+func (m *mockTokenRepo) GetSession(ctx context.Context, id uuid.UUID) (*authdomain.Session, error) {
+	args := m.Called(ctx, id)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*authdomain.Session), args.Error(1)
+}
+func (m *mockTokenRepo) UpdateSessionRefreshHash(ctx context.Context, id uuid.UUID, refreshHash string, expiresAt time.Time) error {
+	return m.Called(ctx, id, refreshHash, expiresAt).Error(0)
+}
+func (m *mockTokenRepo) RevokeSession(ctx context.Context, id uuid.UUID, revokedAt time.Time) error {
+	return m.Called(ctx, id, revokedAt).Error(0)
+}
+func (m *mockTokenRepo) RevokeSessionsForUser(ctx context.Context, userID uuid.UUID, revokedAt time.Time) error {
+	return m.Called(ctx, userID, revokedAt).Error(0)
 }
 
 type noopEmail struct{}
@@ -156,7 +185,8 @@ func newTestUseCase(ur *mockUserRepo, wr *mockWorkspaceRepo) *ucauth.UseCase {
 	}
 	tr.On("DeleteVerificationTokensForUser", mock.Anything, mock.Anything).Maybe().Return(nil)
 	tr.On("CreateVerificationToken", mock.Anything, mock.AnythingOfType("*auth.VerificationToken")).Maybe().Return(nil)
-	return ucauth.NewUseCase(ur, wr, tr, infraauth.NewJWTService(jwtCfg), noopEmail{}, "http://localhost:3000")
+	tr.On("CreateSession", mock.Anything, mock.AnythingOfType("*auth.Session")).Maybe().Return(nil)
+	return ucauth.NewUseCase(ur, wr, tr, infraauth.NewJWTService(jwtCfg), noopEmail{}, "http://localhost:3000", false)
 }
 
 func TestRegister_Success(t *testing.T) {
@@ -174,7 +204,7 @@ func TestRegister_Success(t *testing.T) {
 		Email:         "test@example.com",
 		Password:      "securepassword",
 		WorkspaceName: "Test Workspace",
-	})
+	}, ucauth.RequestMeta{Remember: true})
 
 	assert.NoError(t, err)
 	assert.NotNil(t, res)
@@ -198,7 +228,7 @@ func TestRegister_DuplicateEmail(t *testing.T) {
 		Email:         "test@example.com",
 		Password:      "securepassword",
 		WorkspaceName: "Test Workspace",
-	})
+	}, ucauth.RequestMeta{Remember: true})
 
 	assert.ErrorIs(t, err, apperr.ErrConflict)
 }
@@ -213,7 +243,7 @@ func TestLogin_InvalidCredentials(t *testing.T) {
 	_, err := uc.Login(context.Background(), ucauth.LoginInput{
 		Email:    "wrong@example.com",
 		Password: "anypassword",
-	})
+	}, ucauth.RequestMeta{Remember: true})
 
 	assert.ErrorIs(t, err, apperr.ErrInvalidCredentials)
 }

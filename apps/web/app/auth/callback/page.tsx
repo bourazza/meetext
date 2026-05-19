@@ -2,7 +2,6 @@
 
 import { Suspense, useEffect } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
-import { setTokens } from '@/lib/api'
 import { getCurrentUser } from '@/services/auth'
 import { getWorkspaces } from '@/services/workspace'
 import { useAuthStore } from '@/store/auth'
@@ -21,16 +20,12 @@ function OAuthCallback() {
   const { setUser, setWorkspace } = useAuthStore()
 
   useEffect(() => {
-    const accessToken = params.get('access_token')
-    const refreshToken = params.get('refresh_token')
     const error = params.get('error')
 
-    if (error || !accessToken || !refreshToken) {
+    if (error) {
       router.replace(`/login?error=${error ?? 'oauth_failed'}`)
       return
     }
-
-    setTokens(accessToken, refreshToken)
 
     Promise.all([getCurrentUser(), getWorkspaces()])
       .then(([user, workspaces]) => {

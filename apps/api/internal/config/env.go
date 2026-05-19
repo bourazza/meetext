@@ -62,6 +62,10 @@ func Load(path string) (*Config, error) {
 		RefreshTTL:    v.GetDuration("JWT_REFRESH_TTL"),
 	}
 
+	cfg.Auth = AuthConfig{
+		RequireEmailVerified: v.GetBool("AUTH_REQUIRE_EMAIL_VERIFIED"),
+	}
+
 	cfg.OAuth = OAuthConfig{
 		GoogleClientID:     v.GetString("GOOGLE_CLIENT_ID"),
 		GoogleClientSecret: v.GetString("GOOGLE_CLIENT_SECRET"),
@@ -123,6 +127,7 @@ func bindEnv(v *viper.Viper) {
 		"JWT_REFRESH_SECRET",
 		"JWT_ACCESS_TTL",
 		"JWT_REFRESH_TTL",
+		"AUTH_REQUIRE_EMAIL_VERIFIED",
 		"GOOGLE_CLIENT_ID",
 		"GOOGLE_CLIENT_SECRET",
 		"GOOGLE_REDIRECT_URL",
@@ -172,6 +177,7 @@ func setDefaults(v *viper.Viper) {
 
 	v.SetDefault("JWT_ACCESS_TTL", 15*time.Minute)
 	v.SetDefault("JWT_REFRESH_TTL", 7*24*time.Hour)
+	v.SetDefault("AUTH_REQUIRE_EMAIL_VERIFIED", false)
 
 	v.SetDefault("GITHUB_REDIRECT_URL", "http://localhost:8080/api/v1/auth/oauth/github/callback")
 

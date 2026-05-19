@@ -43,7 +43,8 @@ export default function RegisterPage() {
       const res = await registerUser({ ...values, workspace_name: workspaceName })
       setUser(res.user)
       if (res.workspace) setWorkspace(res.workspace)
-      router.push('/onboarding')
+      toast.success('Account created. Check your inbox to verify your email.')
+      router.push('/dashboard')
     } catch (err: any) {
       toast.error(err?.response?.data?.error?.message ?? 'Could not create your account.')
     }

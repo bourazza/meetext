@@ -61,6 +61,34 @@ func (r *UserRepository) GetByProviderID(ctx context.Context, provider user.Prov
 	return r.scanOne(r.db.QueryRow(ctx, q, provider, providerID))
 }
 
+func (r *UserRepository) GetByOAuthAccount(ctx context.Context, provider user.Provider, providerAccountID string) (*user.User, error) {
+	q := `SELECT u.id, u.full_name, u.email, COALESCE(u.password_hash,''), u.avatar_url, u.plan,
+		         u.provider, u.provider_id, u.email_verified_at, u.last_login_at, u.created_at, u.updated_at
+		  FROM users u
+		  JOIN oauth_accounts oa ON oa.user_id = u.id
+		  WHERE oa.provider=$1 AND oa.provider_account_id=$2`
+	return r.scanOne(r.db.QueryRow(ctx, q, provider, providerAccountID))
+}
+
+func (r *UserRepository) UpsertOAuthAccount(ctx context.Context, account *user.OAuthAccount) error {
+	q := `INSERT INTO oauth_accounts
+		  (id, user_id, provider, provider_account_id, email, avatar_url, created_at, updated_at)
+		  VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+		  ON CONFLICT (provider, provider_account_id)
+		  DO UPDATE SET user_id=EXCLUDED.user_id,
+		                email=EXCLUDED.email,
+		                avatar_url=EXCLUDED.avatar_url,
+		                updated_at=EXCLUDED.updated_at`
+	_, err := r.db.Exec(ctx, q,
+		account.ID, account.UserID, account.Provider, account.ProviderAccountID,
+		account.Email, account.AvatarURL, account.CreatedAt, account.UpdatedAt,
+	)
+	if err != nil {
+		return fmt.Errorf("user repo: upsert oauth account: %w", err)
+	}
+	return nil
+}
+
 func (r *UserRepository) Update(ctx context.Context, u *user.User) error {
 	q := `UPDATE users
 	      SET full_name=$1, avatar_url=$2, provider=$3, provider_id=$4,

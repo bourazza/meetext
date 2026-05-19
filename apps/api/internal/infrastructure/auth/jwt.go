@@ -13,6 +13,7 @@ import (
 
 type Claims struct {
 	UserID      uuid.UUID `json:"user_id"`
+	SessionID   uuid.UUID `json:"session_id"`
 	WorkspaceID uuid.UUID `json:"workspace_id,omitempty"`
 	Role        string    `json:"role,omitempty"`
 	jwt.RegisteredClaims
@@ -31,12 +32,12 @@ func NewJWTService(cfg config.JWTConfig) *JWTService {
 	return &JWTService{cfg: cfg}
 }
 
-func (s *JWTService) IssueTokenPair(userID uuid.UUID) (*TokenPair, error) {
-	access, err := s.sign(userID, s.cfg.AccessSecret, s.cfg.AccessTTL)
+func (s *JWTService) IssueTokenPair(userID, sessionID uuid.UUID) (*TokenPair, error) {
+	access, err := s.sign(userID, sessionID, s.cfg.AccessSecret, s.cfg.AccessTTL)
 	if err != nil {
 		return nil, err
 	}
-	refresh, err := s.sign(userID, s.cfg.RefreshSecret, s.cfg.RefreshTTL)
+	refresh, err := s.sign(userID, sessionID, s.cfg.RefreshSecret, s.cfg.RefreshTTL)
 	if err != nil {
 		return nil, err
 	}
@@ -51,9 +52,18 @@ func (s *JWTService) ValidateRefreshToken(tokenStr string) (*Claims, error) {
 	return s.parse(tokenStr, s.cfg.RefreshSecret)
 }
 
-func (s *JWTService) sign(userID uuid.UUID, secret string, ttl time.Duration) (string, error) {
+func (s *JWTService) AccessTTL() time.Duration {
+	return s.cfg.AccessTTL
+}
+
+func (s *JWTService) RefreshTTL() time.Duration {
+	return s.cfg.RefreshTTL
+}
+
+func (s *JWTService) sign(userID, sessionID uuid.UUID, secret string, ttl time.Duration) (string, error) {
 	claims := Claims{
-		UserID: userID,
+		UserID:    userID,
+		SessionID: sessionID,
 		RegisteredClaims: jwt.RegisteredClaims{
 			ExpiresAt: jwt.NewNumericDate(time.Now().Add(ttl)),
 			IssuedAt:  jwt.NewNumericDate(time.Now()),

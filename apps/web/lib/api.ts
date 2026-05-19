@@ -4,41 +4,30 @@ import type { TokenPair } from '@/types'
 const api = axios.create({
   baseURL: '/api/v1',
   headers: { 'Content-Type': 'application/json' },
-  withCredentials: false,
+  withCredentials: true,
   timeout: 15000,
-})
-
-// Inject access token on every request
-api.interceptors.request.use((config) => {
-  const token = getAccessToken()
-  if (token) config.headers.Authorization = `Bearer ${token}`
-  return config
 })
 
 let refreshPromise: Promise<TokenPair> | null = null
 
-// On 401, try one refresh before sending the user back to sign in.
+// On 401, ask the API to rotate the HttpOnly refresh-cookie session once.
 api.interceptors.response.use(
   (res) => res,
   async (error: AxiosError) => {
     const original = error.config as (typeof error.config & { _retry?: boolean }) | undefined
-    const refresh = getRefreshToken()
 
-    if (error.response?.status === 401 && original && !original._retry && refresh && !original.url?.includes('/auth/refresh')) {
+    if (error.response?.status === 401 && original && !original._retry && !original.url?.includes('/auth/refresh')) {
       original._retry = true
       try {
         refreshPromise =
           refreshPromise ??
           api
-            .post<{ success: boolean; data: TokenPair }>('/auth/refresh', { refresh_token: refresh })
+            .post<{ success: boolean; data: TokenPair }>('/auth/refresh', {})
             .then((res) => res.data.data)
             .finally(() => {
               refreshPromise = null
             })
-        const tokens = await refreshPromise
-        setTokens(tokens.access_token, tokens.refresh_token, true)
-        original.headers = original.headers ?? {}
-        original.headers.Authorization = `Bearer ${tokens.access_token}`
+        await refreshPromise
         return api(original)
       } catch {
         clearTokens()
@@ -61,26 +50,20 @@ export default api
 // ── Token helpers ─────────────────────────────────────────────────────────────
 
 export function getAccessToken(): string | null {
-  if (typeof window === 'undefined') return null
-  return localStorage.getItem('access_token')
+  return null
 }
 
 export function getRefreshToken(): string | null {
-  if (typeof window === 'undefined') return null
-  return localStorage.getItem('refresh_token')
+  return null
 }
 
-export function setTokens(access: string, refresh: string, remember = true) {
-  localStorage.setItem('access_token', access)
-  localStorage.setItem('refresh_token', refresh)
-  // Also set a cookie so Next.js middleware can check auth server-side
-  const maxAge = remember ? 7 * 24 * 60 * 60 : 15 * 60
-  document.cookie = `meetext_token=${access}; path=/; max-age=${maxAge}; SameSite=Lax`
+export function setTokens(_access: string, _refresh: string, _remember = true) {
+  // Tokens are delivered by the API as HttpOnly cookies. This compatibility
+  // hook is intentionally a no-op for older call sites.
 }
 
 export function clearTokens() {
-  localStorage.removeItem('access_token')
-  localStorage.removeItem('refresh_token')
-  // Clear the middleware cookie
-  document.cookie = 'meetext_token=; path=/; max-age=0; SameSite=Lax'
+  if (typeof window === 'undefined') return
+  document.cookie = 'meetext_access=; path=/; max-age=0; SameSite=Lax'
+  document.cookie = 'meetext_refresh=; path=/; max-age=0; SameSite=Lax'
 }

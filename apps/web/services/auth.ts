@@ -1,4 +1,4 @@
-import api, { setTokens, clearTokens } from '@/lib/api'
+import api, { clearTokens } from '@/lib/api'
 import type { AuthResponse, TokenPair, User } from '@/types'
 
 export interface RegisterInput {
@@ -16,13 +16,11 @@ export interface LoginInput {
 
 export async function register(input: RegisterInput): Promise<AuthResponse> {
   const { data } = await api.post<{ success: boolean; data: AuthResponse }>('/auth/register', input)
-  setTokens(data.data.access_token, data.data.refresh_token)
   return data.data
 }
 
 export async function login(input: LoginInput): Promise<AuthResponse> {
   const { data } = await api.post<{ success: boolean; data: AuthResponse }>('/auth/login', input)
-  setTokens(data.data.access_token, data.data.refresh_token, input.remember_me)
   return data.data
 }
 
@@ -35,7 +33,6 @@ export async function refreshToken(refreshToken: string): Promise<TokenPair> {
   const { data } = await api.post<{ success: boolean; data: TokenPair }>('/auth/refresh', {
     refresh_token: refreshToken,
   })
-  setTokens(data.data.access_token, data.data.refresh_token)
   return data.data
 }
 

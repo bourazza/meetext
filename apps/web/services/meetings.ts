@@ -7,6 +7,7 @@ export interface UploadMeetingInput {
   title?: string
   projectId?: string
   clientId?: string
+  onProgress?: (progress: number) => void
 }
 
 export async function uploadMeeting(input: UploadMeetingInput): Promise<Meeting> {
@@ -19,7 +20,13 @@ export async function uploadMeeting(input: UploadMeetingInput): Promise<Meeting>
   const { data } = await api.post<{ success: boolean; data: Meeting }>(
     `/workspaces/${input.workspaceId}/meetings`,
     form,
-    { headers: { 'Content-Type': 'multipart/form-data' } }
+    {
+      headers: { 'Content-Type': 'multipart/form-data' },
+      onUploadProgress: (event) => {
+        if (!input.onProgress || !event.total) return
+        input.onProgress(Math.round((event.loaded / event.total) * 100))
+      },
+    }
   )
   return data.data
 }

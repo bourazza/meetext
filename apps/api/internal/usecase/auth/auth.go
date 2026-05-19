@@ -30,8 +30,9 @@ type RegisterInput struct {
 }
 
 type LoginInput struct {
-	Email    string `json:"email"    validate:"required,email"`
-	Password string `json:"password" validate:"required"`
+	Email      string `json:"email"       validate:"required,email"`
+	Password   string `json:"password"    validate:"required"`
+	RememberMe bool   `json:"remember_me"`
 }
 
 type ForgotPasswordInput struct {
@@ -51,6 +52,12 @@ type ResendVerificationInput struct {
 	Email string `json:"email" validate:"required,email"`
 }
 
+type RequestMeta struct {
+	UserAgent string
+	IP        string
+	Remember  bool
+}
+
 type AuthResponse struct {
 	User         *user.User           `json:"user"`
 	Workspace    *workspace.Workspace `json:"workspace,omitempty"`
@@ -59,12 +66,13 @@ type AuthResponse struct {
 }
 
 type UseCase struct {
-	userRepo      user.Repository
-	workspaceRepo workspace.Repository
-	tokenRepo     authdomain.TokenRepository
-	jwt           *infraauth.JWTService
-	email         email.Service
-	frontendURL   string
+	userRepo        user.Repository
+	workspaceRepo   workspace.Repository
+	tokenRepo       authdomain.TokenRepository
+	jwt             *infraauth.JWTService
+	email           email.Service
+	frontendURL     string
+	requireVerified bool
 }
 
 func NewUseCase(
@@ -74,18 +82,20 @@ func NewUseCase(
 	jwt *infraauth.JWTService,
 	email email.Service,
 	frontendURL string,
+	requireVerified bool,
 ) *UseCase {
 	return &UseCase{
-		userRepo:      userRepo,
-		workspaceRepo: workspaceRepo,
-		tokenRepo:     tokenRepo,
-		jwt:           jwt,
-		email:         email,
-		frontendURL:   strings.TrimRight(frontendURL, "/"),
+		userRepo:        userRepo,
+		workspaceRepo:   workspaceRepo,
+		tokenRepo:       tokenRepo,
+		jwt:             jwt,
+		email:           email,
+		frontendURL:     strings.TrimRight(frontendURL, "/"),
+		requireVerified: requireVerified,
 	}
 }
 
-func (uc *UseCase) Register(ctx context.Context, in RegisterInput) (*AuthResponse, error) {
+func (uc *UseCase) Register(ctx context.Context, in RegisterInput, meta RequestMeta) (*AuthResponse, error) {
 	in.Email = strings.ToLower(strings.TrimSpace(in.Email))
 	in.FullName = strings.TrimSpace(in.FullName)
 
@@ -130,35 +140,44 @@ func (uc *UseCase) Register(ctx context.Context, in RegisterInput) (*AuthRespons
 		return nil, err
 	}
 
-	tokens, err := uc.jwt.IssueTokenPair(u.ID)
+	tokens, err := uc.createSessionAndTokens(ctx, u.ID, meta)
 	if err != nil {
 		return nil, fmt.Errorf("auth: issue tokens: %w", err)
 	}
 	return &AuthResponse{User: u, Workspace: ws, AccessToken: tokens.AccessToken, RefreshToken: tokens.RefreshToken}, nil
 }
 
-func (uc *UseCase) Login(ctx context.Context, in LoginInput) (*AuthResponse, error) {
+func (uc *UseCase) Login(ctx context.Context, in LoginInput, meta RequestMeta) (*AuthResponse, error) {
 	in.Email = strings.ToLower(strings.TrimSpace(in.Email))
 
 	u, err := uc.userRepo.GetByEmail(ctx, in.Email)
 	if err != nil {
 		return nil, apperr.ErrInvalidCredentials
 	}
-	if u.Provider != user.ProviderLocal || u.PasswordHash == "" {
+	if u.PasswordHash == "" {
 		return nil, apperr.ErrInvalidCredentials
 	}
 	if !password.Compare(u.PasswordHash, in.Password) {
 		return nil, apperr.ErrInvalidCredentials
 	}
+	if uc.requireVerified && u.EmailVerifiedAt == nil {
+		return nil, apperr.ErrEmailNotVerified
+	}
 
-	tokens, err := uc.jwt.IssueTokenPair(u.ID)
+	tokens, err := uc.createSessionAndTokens(ctx, u.ID, meta)
 	if err != nil {
 		return nil, fmt.Errorf("auth: issue tokens: %w", err)
 	}
 	now := time.Now()
 	_ = uc.userRepo.RecordLogin(ctx, u.ID, now)
 	u.LastLoginAt = &now
-	return &AuthResponse{User: u, AccessToken: tokens.AccessToken, RefreshToken: tokens.RefreshToken}, nil
+
+	workspaces, _ := uc.workspaceRepo.ListByUserID(ctx, u.ID)
+	var ws *workspace.Workspace
+	if len(workspaces) > 0 {
+		ws = workspaces[0]
+	}
+	return &AuthResponse{User: u, Workspace: ws, AccessToken: tokens.AccessToken, RefreshToken: tokens.RefreshToken}, nil
 }
 
 func (uc *UseCase) RefreshToken(ctx context.Context, refreshToken string) (*infraauth.TokenPair, error) {
@@ -166,10 +185,41 @@ func (uc *UseCase) RefreshToken(ctx context.Context, refreshToken string) (*infr
 	if err != nil {
 		return nil, err
 	}
+	session, err := uc.tokenRepo.GetSession(ctx, claims.SessionID)
+	if err != nil {
+		return nil, apperr.ErrUnauthorized
+	}
+	now := time.Now()
+	if session.UserID != claims.UserID || session.RevokedAt != nil || now.After(session.ExpiresAt) {
+		return nil, apperr.ErrUnauthorized
+	}
+	if session.RefreshHash != hashToken(refreshToken) {
+		_ = uc.tokenRepo.RevokeSession(ctx, session.ID, now)
+		return nil, apperr.ErrUnauthorized
+	}
 	if _, err := uc.userRepo.GetByID(ctx, claims.UserID); err != nil {
 		return nil, apperr.ErrUnauthorized
 	}
-	return uc.jwt.IssueTokenPair(claims.UserID)
+	tokens, err := uc.jwt.IssueTokenPair(claims.UserID, claims.SessionID)
+	if err != nil {
+		return nil, err
+	}
+	if err := uc.tokenRepo.UpdateSessionRefreshHash(ctx, claims.SessionID, hashToken(tokens.RefreshToken), now.Add(uc.jwt.RefreshTTL())); err != nil {
+		return nil, err
+	}
+	return tokens, nil
+}
+
+func (uc *UseCase) Logout(ctx context.Context, refreshToken string) error {
+	if refreshToken == "" {
+		return nil
+	}
+	claims, err := uc.jwt.ValidateRefreshToken(refreshToken)
+	if err != nil {
+		return nil
+	}
+	_ = uc.tokenRepo.RevokeSession(ctx, claims.SessionID, time.Now())
+	return nil
 }
 
 func (uc *UseCase) CurrentUser(ctx context.Context, userID uuid.UUID) (*user.User, error) {
@@ -232,6 +282,7 @@ func (uc *UseCase) ResetPassword(ctx context.Context, in ResetPasswordInput) err
 	if err := uc.tokenRepo.MarkPasswordResetTokenUsed(ctx, token.ID, now); err != nil {
 		return err
 	}
+	_ = uc.tokenRepo.RevokeSessionsForUser(ctx, token.UserID, now)
 	return nil
 }
 
@@ -270,11 +321,17 @@ func (uc *UseCase) ResendVerification(ctx context.Context, in ResendVerification
 }
 
 // OAuthLogin finds or creates a user from an OAuth provider profile, then issues a JWT pair.
-func (uc *UseCase) OAuthLogin(ctx context.Context, provider user.Provider, info *infraoauth.UserInfo) (*AuthResponse, error) {
+func (uc *UseCase) OAuthLogin(ctx context.Context, provider user.Provider, info *infraoauth.UserInfo, meta RequestMeta) (*AuthResponse, error) {
 	// 1. Try to find by provider + provider_id (fastest path)
-	u, err := uc.userRepo.GetByProviderID(ctx, provider, info.ProviderID)
+	u, err := uc.userRepo.GetByOAuthAccount(ctx, provider, info.ProviderID)
 	if err != nil && err != apperr.ErrNotFound {
 		return nil, fmt.Errorf("auth: oauth lookup: %w", err)
+	}
+	if u == nil {
+		u, err = uc.userRepo.GetByProviderID(ctx, provider, info.ProviderID)
+		if err != nil && err != apperr.ErrNotFound {
+			return nil, fmt.Errorf("auth: oauth legacy lookup: %w", err)
+		}
 	}
 
 	if u == nil {
@@ -306,6 +363,9 @@ func (uc *UseCase) OAuthLogin(ctx context.Context, provider user.Provider, info 
 			}
 		}
 	}
+	if err := uc.upsertOAuthAccount(ctx, u.ID, provider, info); err != nil {
+		return nil, err
+	}
 
 	// Fetch first workspace for response
 	workspaces, _ := uc.workspaceRepo.ListByUserID(ctx, u.ID)
@@ -314,7 +374,7 @@ func (uc *UseCase) OAuthLogin(ctx context.Context, provider user.Provider, info 
 		ws = workspaces[0]
 	}
 
-	tokens, err := uc.jwt.IssueTokenPair(u.ID)
+	tokens, err := uc.createSessionAndTokens(ctx, u.ID, meta)
 	if err != nil {
 		return nil, fmt.Errorf("auth: issue tokens: %w", err)
 	}
@@ -348,6 +408,9 @@ func (uc *UseCase) createOAuthUser(ctx context.Context, provider user.Provider, 
 	if err := uc.userRepo.Create(ctx, u); err != nil {
 		return nil, fmt.Errorf("auth: create oauth user: %w", err)
 	}
+	if err := uc.upsertOAuthAccount(ctx, u.ID, provider, info); err != nil {
+		return nil, err
+	}
 
 	// Auto-create workspace from name
 	wsName := derivedWorkspaceName(info.Name)
@@ -355,6 +418,64 @@ func (uc *UseCase) createOAuthUser(ctx context.Context, provider user.Provider, 
 		return nil, err
 	}
 	return u, nil
+}
+
+func (uc *UseCase) upsertOAuthAccount(ctx context.Context, userID uuid.UUID, provider user.Provider, info *infraoauth.UserInfo) error {
+	now := time.Now()
+	var avatarURL *string
+	if info.AvatarURL != "" {
+		avatarURL = &info.AvatarURL
+	}
+	if err := uc.userRepo.UpsertOAuthAccount(ctx, &user.OAuthAccount{
+		ID:                uuid.New(),
+		UserID:            userID,
+		Provider:          provider,
+		ProviderAccountID: info.ProviderID,
+		Email:             strings.ToLower(strings.TrimSpace(info.Email)),
+		AvatarURL:         avatarURL,
+		CreatedAt:         now,
+		UpdatedAt:         now,
+	}); err != nil {
+		return fmt.Errorf("auth: upsert oauth account: %w", err)
+	}
+	return nil
+}
+
+func (uc *UseCase) createSessionAndTokens(ctx context.Context, userID uuid.UUID, meta RequestMeta) (*infraauth.TokenPair, error) {
+	now := time.Now()
+	sessionID := uuid.New()
+	tokens, err := uc.jwt.IssueTokenPair(userID, sessionID)
+	if err != nil {
+		return nil, err
+	}
+
+	userAgent := nullableMeta(meta.UserAgent)
+	ip := nullableMeta(meta.IP)
+	refreshTTL := uc.jwt.RefreshTTL()
+	if !meta.Remember {
+		refreshTTL = 24 * time.Hour
+	}
+	session := &authdomain.Session{
+		ID:          sessionID,
+		UserID:      userID,
+		RefreshHash: hashToken(tokens.RefreshToken),
+		UserAgent:   userAgent,
+		IPAddress:   ip,
+		ExpiresAt:   now.Add(refreshTTL),
+		CreatedAt:   now,
+	}
+	if err := uc.tokenRepo.CreateSession(ctx, session); err != nil {
+		return nil, err
+	}
+	return tokens, nil
+}
+
+func nullableMeta(value string) *string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return nil
+	}
+	return &value
 }
 
 func (uc *UseCase) issueVerificationEmail(ctx context.Context, u *user.User) error {

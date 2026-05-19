@@ -10,6 +10,7 @@ import (
 	"github.com/go-chi/httprate"
 	"github.com/meetext/backend/internal/delivery/http/handler"
 	httpmiddleware "github.com/meetext/backend/internal/delivery/http/middleware"
+	authdomain "github.com/meetext/backend/internal/domain/auth"
 	infraauth "github.com/meetext/backend/internal/infrastructure/auth"
 	"github.com/meetext/backend/pkg/response"
 	"github.com/rs/zerolog"
@@ -23,7 +24,7 @@ type Handlers struct {
 	Meeting     *handler.MeetingHandler
 }
 
-func New(log zerolog.Logger, jwt *infraauth.JWTService, frontendURL string, h Handlers) http.Handler {
+func New(log zerolog.Logger, jwt *infraauth.JWTService, sessions authdomain.TokenRepository, frontendURL string, h Handlers) http.Handler {
 	r := chi.NewRouter()
 
 	r.Use(chimiddleware.RequestID)
@@ -66,7 +67,7 @@ func New(log zerolog.Logger, jwt *infraauth.JWTService, frontendURL string, h Ha
 
 		// Protected routes
 		r.Group(func(r chi.Router) {
-			r.Use(httpmiddleware.Auth(jwt))
+			r.Use(httpmiddleware.Auth(jwt, sessions, log))
 
 			r.Get("/auth/me", h.Auth.Me)
 

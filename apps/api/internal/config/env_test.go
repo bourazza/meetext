@@ -73,7 +73,7 @@ func TestLoadUsesEnvironmentOverrideForGoogleClientID(t *testing.T) {
 	}
 }
 
-func TestValidateAPIFailsWhenGoogleOAuthIsMissing(t *testing.T) {
+func TestValidateAPIAllowsPasswordAuthWhenGoogleOAuthIsMissing(t *testing.T) {
 	cfg := &Config{
 		App: AppConfig{FrontendURL: "http://localhost:3000"},
 		DB:  DBConfig{DSN: "postgres://meetext:meetext@localhost:5432/meetext?sslmode=disable"},
@@ -87,13 +87,8 @@ func TestValidateAPIFailsWhenGoogleOAuthIsMissing(t *testing.T) {
 		},
 	}
 
-	err := cfg.ValidateAPI()
-	if err == nil {
-		t.Fatal("expected validation error")
-	}
-	if !strings.Contains(err.Error(), "GOOGLE_CLIENT_ID") ||
-		!strings.Contains(err.Error(), "GOOGLE_CLIENT_SECRET") {
-		t.Fatalf("unexpected validation error: %v", err)
+	if err := cfg.ValidateAPI(); err != nil {
+		t.Fatalf("validate api config: %v", err)
 	}
 }
 

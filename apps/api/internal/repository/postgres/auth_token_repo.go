@@ -110,3 +110,65 @@ func (r *AuthTokenRepository) DeletePasswordResetTokensForUser(ctx context.Conte
 	}
 	return nil
 }
+
+func (r *AuthTokenRepository) CreateSession(ctx context.Context, session *authdomain.Session) error {
+	q := `INSERT INTO sessions (id, user_id, refresh_hash, user_agent, ip_address, expires_at, revoked_at, created_at)
+	      VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`
+	_, err := r.db.Exec(ctx, q,
+		session.ID, session.UserID, session.RefreshHash, session.UserAgent,
+		session.IPAddress, session.ExpiresAt, session.RevokedAt, session.CreatedAt,
+	)
+	if err != nil {
+		return fmt.Errorf("auth token repo: create session: %w", err)
+	}
+	return nil
+}
+
+func (r *AuthTokenRepository) GetSession(ctx context.Context, id uuid.UUID) (*authdomain.Session, error) {
+	q := `SELECT id, user_id, refresh_hash, user_agent, host(ip_address), expires_at, revoked_at, created_at
+	      FROM sessions WHERE id=$1`
+	session := &authdomain.Session{}
+	err := r.db.QueryRow(ctx, q, id).Scan(
+		&session.ID, &session.UserID, &session.RefreshHash, &session.UserAgent,
+		&session.IPAddress, &session.ExpiresAt, &session.RevokedAt, &session.CreatedAt,
+	)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, apperr.ErrNotFound
+		}
+		return nil, fmt.Errorf("auth token repo: get session: %w", err)
+	}
+	return session, nil
+}
+
+func (r *AuthTokenRepository) UpdateSessionRefreshHash(ctx context.Context, id uuid.UUID, refreshHash string, expiresAt time.Time) error {
+	q := `UPDATE sessions SET refresh_hash=$1, expires_at=$2 WHERE id=$3 AND revoked_at IS NULL`
+	tag, err := r.db.Exec(ctx, q, refreshHash, expiresAt, id)
+	if err != nil {
+		return fmt.Errorf("auth token repo: update session refresh hash: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return apperr.ErrNotFound
+	}
+	return nil
+}
+
+func (r *AuthTokenRepository) RevokeSession(ctx context.Context, id uuid.UUID, revokedAt time.Time) error {
+	q := `UPDATE sessions SET revoked_at=$1 WHERE id=$2 AND revoked_at IS NULL`
+	tag, err := r.db.Exec(ctx, q, revokedAt, id)
+	if err != nil {
+		return fmt.Errorf("auth token repo: revoke session: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return apperr.ErrNotFound
+	}
+	return nil
+}
+
+func (r *AuthTokenRepository) RevokeSessionsForUser(ctx context.Context, userID uuid.UUID, revokedAt time.Time) error {
+	_, err := r.db.Exec(ctx, `UPDATE sessions SET revoked_at=$1 WHERE user_id=$2 AND revoked_at IS NULL`, revokedAt, userID)
+	if err != nil {
+		return fmt.Errorf("auth token repo: revoke user sessions: %w", err)
+	}
+	return nil
+}

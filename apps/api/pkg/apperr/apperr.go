@@ -39,6 +39,7 @@ var (
 	ErrUnprocessable      = New(http.StatusUnprocessableEntity, "UNPROCESSABLE", "unprocessable entity")
 	ErrInternal           = New(http.StatusInternalServerError, "INTERNAL_ERROR", "internal server error")
 	ErrInvalidCredentials = New(http.StatusUnauthorized, "INVALID_CREDENTIALS", "invalid email or password")
+	ErrEmailNotVerified   = New(http.StatusForbidden, "EMAIL_NOT_VERIFIED", "verify your email before signing in")
 	ErrTokenExpired       = New(http.StatusUnauthorized, "TOKEN_EXPIRED", "token has expired")
 	ErrTokenInvalid       = New(http.StatusUnauthorized, "TOKEN_INVALID", "token is invalid")
 	ErrFileTooLarge       = New(http.StatusRequestEntityTooLarge, "FILE_TOO_LARGE", "file exceeds maximum allowed size")

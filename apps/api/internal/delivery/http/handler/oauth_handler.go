@@ -68,8 +68,8 @@ func (h *OAuthHandler) Redirect(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, authURL, http.StatusTemporaryRedirect)
 }
 
-// Callback handles the provider redirect, exchanges the code for a JWT pair,
-// and redirects the browser back to the frontend with tokens in the query string.
+// Callback handles the provider redirect, exchanges the code, creates a server
+// session, sets secure auth cookies, and redirects the browser to the dashboard.
 //
 // GET /api/v1/auth/oauth/{provider}/callback
 func (h *OAuthHandler) Callback(w http.ResponseWriter, r *http.Request) {
@@ -130,7 +130,7 @@ func (h *OAuthHandler) Callback(w http.ResponseWriter, r *http.Request) {
 	h.log.Debug().Str("email", info.Email).Str("provider_id", info.ProviderID).Msg("oauth: exchange successful")
 
 	// Find or create user, issue JWT
-	res, err := h.authUC.OAuthLogin(r.Context(), h.provider.Name(), info)
+	res, err := h.authUC.OAuthLogin(r.Context(), h.provider.Name(), info, requestMeta(r))
 	if err != nil {
 		h.log.Error().Err(err).Str("email", info.Email).Msg("oauth: login failed")
 		h.redirectError(w, r, "login_failed")
@@ -138,14 +138,10 @@ func (h *OAuthHandler) Callback(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.log.Info().Str("user_id", res.User.ID.String()).Str("email", res.User.Email).Msg("oauth: login successful")
+	setAuthCookies(w, r, res.AccessToken, res.RefreshToken, true)
 
-	// Redirect to frontend with tokens
-	redirectURL := fmt.Sprintf(
-		"%s/auth/callback?access_token=%s&refresh_token=%s",
-		h.frontendURL,
-		url.QueryEscape(res.AccessToken),
-		url.QueryEscape(res.RefreshToken),
-	)
+	redirectURL := fmt.Sprintf("%s/auth/callback?success=true", h.frontendURL)
+	h.log.Debug().Str("redirect_to", redirectURL).Msg("oauth: redirecting to frontend callback")
 	http.Redirect(w, r, redirectURL, http.StatusTemporaryRedirect)
 }
 

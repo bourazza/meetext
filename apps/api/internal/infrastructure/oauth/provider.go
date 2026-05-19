@@ -35,8 +35,8 @@ type Provider struct {
 }
 
 // NewGoogle returns a configured Google OAuth provider.
-func NewGoogle(cfg config.OAuthConfig) (*Provider, error) {
-	provider := &Provider{
+func NewGoogle(cfg config.OAuthConfig) *Provider {
+	return &Provider{
 		name: user.ProviderGoogle,
 		cfg: &oauth2.Config{
 			ClientID:     cfg.GoogleClientID,
@@ -48,10 +48,6 @@ func NewGoogle(cfg config.OAuthConfig) (*Provider, error) {
 		fetchUser:   fetchGoogleUser,
 		stateSecret: cfg.StateSecret,
 	}
-	if err := provider.Validate(); err != nil {
-		return nil, fmt.Errorf("google oauth: %w", err)
-	}
-	return provider, nil
 }
 
 // NewGitHub returns a configured GitHub OAuth provider.

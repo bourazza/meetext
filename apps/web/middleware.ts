@@ -1,22 +1,43 @@
 import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
 
-const PUBLIC_PATHS = ['/login', '/register', '/forgot-password', '/reset-password', '/verify-email']
+// Paths that unauthenticated users can access
+const PUBLIC_PATHS = [
+  '/login',
+  '/register',
+  '/forgot-password',
+  '/reset-password',
+  '/verify-email',
+  '/auth/callback'
+]
 
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl
 
-  // Always allow public auth pages — prevents redirect loop
-  if (PUBLIC_PATHS.some((p) => pathname === p || pathname.startsWith(p + '/'))) {
-    return NextResponse.next()
+  const hasSession =
+    Boolean(request.cookies.get('meetext_access')?.value) ||
+    Boolean(request.cookies.get('meetext_refresh')?.value)
+
+  const isPublicPath = PUBLIC_PATHS.some((p) => pathname === p || pathname.startsWith(p + '/'))
+
+  // If user is authenticated and trying to access an auth page, redirect to dashboard
+  if (hasSession && isPublicPath) {
+    return NextResponse.redirect(new URL('/dashboard', request.url))
   }
 
-  // Check token cookie (set by lib/api.ts on login)
-  const token = request.cookies.get('meetext_token')?.value
-
-  if (!token) {
+  // If user is NOT authenticated and trying to access a protected page, redirect to login
+  if (!hasSession && !isPublicPath) {
     const loginUrl = new URL('/login', request.url)
+    // Avoid setting 'next' to '/' to keep URL clean, or let it be.
+    if (pathname !== '/') {
+      loginUrl.searchParams.set('next', pathname)
+    }
     return NextResponse.redirect(loginUrl)
+  }
+
+  // Handle root route redirection specifically
+  if (pathname === '/') {
+    return NextResponse.redirect(new URL('/dashboard', request.url))
   }
 
   return NextResponse.next()

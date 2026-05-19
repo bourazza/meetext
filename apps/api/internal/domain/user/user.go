@@ -38,11 +38,24 @@ type User struct {
 	UpdatedAt       time.Time  `json:"updated_at"`
 }
 
+type OAuthAccount struct {
+	ID                uuid.UUID
+	UserID            uuid.UUID
+	Provider          Provider
+	ProviderAccountID string
+	Email             string
+	AvatarURL         *string
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
+}
+
 type Repository interface {
 	Create(ctx context.Context, u *User) error
 	GetByID(ctx context.Context, id uuid.UUID) (*User, error)
 	GetByEmail(ctx context.Context, email string) (*User, error)
 	GetByProviderID(ctx context.Context, provider Provider, providerID string) (*User, error)
+	GetByOAuthAccount(ctx context.Context, provider Provider, providerAccountID string) (*User, error)
+	UpsertOAuthAccount(ctx context.Context, account *OAuthAccount) error
 	Update(ctx context.Context, u *User) error
 	MarkEmailVerified(ctx context.Context, id uuid.UUID, verifiedAt time.Time) error
 	UpdatePassword(ctx context.Context, id uuid.UUID, passwordHash string, updatedAt time.Time) error

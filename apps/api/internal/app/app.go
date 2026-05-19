@@ -54,21 +54,22 @@ func New(cfg *config.Config, log zerolog.Logger) (*App, error) {
 
 	// Use cases
 	emailSvc := email.NewLogService(log)
-	authUC := ucauth.NewUseCase(userRepo, workspaceRepo, authTokenRepo, jwtSvc, emailSvc, cfg.App.FrontendURL)
+	authUC := ucauth.NewUseCase(userRepo, workspaceRepo, authTokenRepo, jwtSvc, emailSvc, cfg.App.FrontendURL, cfg.Auth.RequireEmailVerified)
 	workspaceUC := ucworkspace.NewUseCase(workspaceRepo)
 	meetingUC := ucmeeting.NewUseCase(meetingRepo, store)
 
 	// OAuth providers
-	googleProvider, err := infraoauth.NewGoogle(cfg.OAuth)
-	if err != nil {
-		return nil, fmt.Errorf("app: google oauth provider: %w", err)
-	}
+	googleProvider := infraoauth.NewGoogle(cfg.OAuth)
 	githubProvider := infraoauth.NewGitHub(cfg.OAuth)
 
-	log.Info().
-		Str("provider", string(googleProvider.Name())).
-		Str("redirect_url", cfg.OAuth.GoogleRedirectURL).
-		Msg("app: OAuth provider registered")
+	if !googleProvider.IsConfigured() {
+		log.Warn().Msg("app: Google OAuth disabled; GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, or GOOGLE_REDIRECT_URL is not set")
+	} else {
+		log.Info().
+			Str("provider", string(googleProvider.Name())).
+			Str("redirect_url", cfg.OAuth.GoogleRedirectURL).
+			Msg("app: OAuth provider registered")
+	}
 	if !githubProvider.IsConfigured() {
 		log.Warn().Msg("app: GitHub OAuth disabled; GITHUB_CLIENT_ID, GITHUB_CLIENT_SECRET, or GITHUB_REDIRECT_URL is not set")
 	} else {
@@ -80,14 +81,14 @@ func New(cfg *config.Config, log zerolog.Logger) (*App, error) {
 
 	// Handlers
 	handlers := router.Handlers{
-		Auth:        handler.NewAuthHandler(authUC),
+		Auth:        handler.NewAuthHandler(authUC, log),
 		OAuthGoogle: handler.NewOAuthHandler(googleProvider, authUC, cfg.App.FrontendURL, log),
 		OAuthGitHub: handler.NewOAuthHandler(githubProvider, authUC, cfg.App.FrontendURL, log),
 		Workspace:   handler.NewWorkspaceHandler(workspaceUC),
 		Meeting:     handler.NewMeetingHandler(meetingUC),
 	}
 
-	httpHandler := router.New(log, jwtSvc, cfg.App.FrontendURL, handlers)
+	httpHandler := router.New(log, jwtSvc, authTokenRepo, cfg.App.FrontendURL, handlers)
 
 	srv := &http.Server{
 		Addr:         cfg.HTTP.Host + ":" + cfg.HTTP.Port,

@@ -13,6 +13,7 @@ type Config struct {
 	HTTP    HTTPConfig
 	DB      DBConfig
 	JWT     JWTConfig
+	Auth    AuthConfig
 	OAuth   OAuthConfig
 	Storage StorageConfig
 	Redis   RedisConfig
@@ -47,6 +48,10 @@ type JWTConfig struct {
 	RefreshSecret string        `mapstructure:"JWT_REFRESH_SECRET"`
 	AccessTTL     time.Duration `mapstructure:"JWT_ACCESS_TTL"`
 	RefreshTTL    time.Duration `mapstructure:"JWT_REFRESH_TTL"`
+}
+
+type AuthConfig struct {
+	RequireEmailVerified bool `mapstructure:"AUTH_REQUIRE_EMAIL_VERIFIED"`
 }
 
 type OAuthConfig struct {
@@ -92,13 +97,10 @@ func (c *Config) ValidateAPI() error {
 	var missing []string
 
 	required := map[string]string{
-		"DATABASE_URL":         c.DB.DSN,
-		"JWT_ACCESS_SECRET":    c.JWT.AccessSecret,
-		"JWT_REFRESH_SECRET":   c.JWT.RefreshSecret,
-		"GOOGLE_CLIENT_ID":     c.OAuth.GoogleClientID,
-		"GOOGLE_CLIENT_SECRET": c.OAuth.GoogleClientSecret,
-		"GOOGLE_REDIRECT_URL":  c.OAuth.GoogleRedirectURL,
-		"OAUTH_STATE_SECRET":   c.OAuth.StateSecret,
+		"DATABASE_URL":       c.DB.DSN,
+		"JWT_ACCESS_SECRET":  c.JWT.AccessSecret,
+		"JWT_REFRESH_SECRET": c.JWT.RefreshSecret,
+		"OAUTH_STATE_SECRET": c.OAuth.StateSecret,
 	}
 
 	for key, value := range required {
@@ -114,8 +116,15 @@ func (c *Config) ValidateAPI() error {
 	if err := validateURL("FRONTEND_URL", c.App.FrontendURL); err != nil {
 		return err
 	}
-	if err := validateURL("GOOGLE_REDIRECT_URL", c.OAuth.GoogleRedirectURL); err != nil {
-		return err
+	if c.OAuth.GoogleRedirectURL != "" {
+		if err := validateURL("GOOGLE_REDIRECT_URL", c.OAuth.GoogleRedirectURL); err != nil {
+			return err
+		}
+	}
+	if c.OAuth.GitHubRedirectURL != "" {
+		if err := validateURL("GITHUB_REDIRECT_URL", c.OAuth.GitHubRedirectURL); err != nil {
+			return err
+		}
 	}
 	if len(c.OAuth.StateSecret) < 32 {
 		return fmt.Errorf("OAUTH_STATE_SECRET must be at least 32 characters")
