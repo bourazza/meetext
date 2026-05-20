@@ -10,6 +10,7 @@ import (
 	"github.com/meetext/backend/pkg/apperr"
 	"github.com/meetext/backend/pkg/constants"
 	"github.com/meetext/backend/pkg/response"
+	"github.com/rs/zerolog/log"
 )
 
 type MeetingHandler struct {
@@ -63,7 +64,7 @@ func (h *MeetingHandler) Upload(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	m, err := h.uc.Upload(r.Context(), meeting.UploadInput{
+	m, aiRes, err := h.uc.Upload(r.Context(), meeting.UploadInput{
 		WorkspaceID: workspaceID,
 		ProjectID:   projectID,
 		ClientID:    clientID,
@@ -75,10 +76,21 @@ func (h *MeetingHandler) Upload(w http.ResponseWriter, r *http.Request) {
 		Reader:      file,
 	})
 	if err != nil {
+		log.Error().Err(err).Msg("meeting: upload failed")
 		response.Error(w, err)
 		return
 	}
-	response.Created(w, m)
+
+	if aiRes != nil {
+		response.Created(w, map[string]interface{}{
+			"meeting":  m,
+			"analysis": aiRes,
+		})
+	} else {
+		response.Created(w, map[string]interface{}{
+			"meeting": m,
+		})
+	}
 }
 
 // GET /api/v1/workspaces/{workspaceID}/meetings

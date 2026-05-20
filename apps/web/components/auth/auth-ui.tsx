@@ -18,13 +18,13 @@ export function AuthPanel({
   footer?: React.ReactNode
 }) {
   return (
-    <section className="w-full rounded-2xl border border-zinc-200 bg-white p-8 shadow-sm">
-      <div className="mb-8 space-y-1.5 text-center">
-        <h1 className="text-2xl font-semibold tracking-tight text-zinc-950">{title}</h1>
-        <p className="text-sm text-zinc-500">{subtitle}</p>
+    <section className="w-full rounded-2xl border border-zinc-200 bg-white p-10 shadow-sm">
+      <div className="mb-10 space-y-2 text-center">
+        <h1 className="text-3xl font-semibold tracking-tight text-zinc-950">{title}</h1>
+        <p className="text-base text-zinc-500">{subtitle}</p>
       </div>
       {children}
-      {footer && <div className="mt-8 text-center text-sm text-zinc-600">{footer}</div>}
+      {footer && <div className="mt-10 text-center text-base text-zinc-600">{footer}</div>}
     </section>
   )
 }

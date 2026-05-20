@@ -44,6 +44,7 @@ var (
 	ErrTokenInvalid       = New(http.StatusUnauthorized, "TOKEN_INVALID", "token is invalid")
 	ErrFileTooLarge       = New(http.StatusRequestEntityTooLarge, "FILE_TOO_LARGE", "file exceeds maximum allowed size")
 	ErrUnsupportedFile    = New(http.StatusBadRequest, "UNSUPPORTED_FILE", "unsupported file type")
+	ErrAudioVideoUnsupported = New(http.StatusBadRequest, "AUDIO_VIDEO_COMING_SOON", "Audio and video uploads are coming soon. Only PDF files are supported currently.")
 )
 
 func As(err error) (*AppError, bool) {

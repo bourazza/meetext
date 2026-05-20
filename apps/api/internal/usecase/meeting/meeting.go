@@ -1,6 +1,7 @@
 package meeting
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -8,7 +9,10 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/meetext/backend/internal/domain/meeting"
+	domainai "github.com/meetext/backend/internal/domain/ai"
+	"github.com/meetext/backend/internal/infrastructure/pdf"
 	"github.com/meetext/backend/internal/infrastructure/storage"
+	ucai "github.com/meetext/backend/internal/usecase/ai"
 	"github.com/meetext/backend/pkg/apperr"
 	"github.com/meetext/backend/pkg/constants"
 )
@@ -33,30 +37,49 @@ type UploadInput struct {
 }
 
 type UseCase struct {
-	repo    meeting.Repository
-	storage storage.Provider
+	repo         meeting.Repository
+	storage      storage.Provider
+	aiUC         *ucai.UseCase
+	pdfExtractor *pdf.Extractor
 }
 
-func NewUseCase(repo meeting.Repository, storage storage.Provider) *UseCase {
-	return &UseCase{repo: repo, storage: storage}
+func NewUseCase(repo meeting.Repository, storage storage.Provider, aiUC *ucai.UseCase, pdfExtractor *pdf.Extractor) *UseCase {
+	return &UseCase{
+		repo:         repo,
+		storage:      storage,
+		aiUC:         aiUC,
+		pdfExtractor: pdfExtractor,
+	}
 }
 
-func (uc *UseCase) Upload(ctx context.Context, in UploadInput) (*meeting.Meeting, error) {
+func (uc *UseCase) Upload(ctx context.Context, in UploadInput) (*meeting.Meeting, *domainai.AIResult, error) {
 	if in.Size > constants.MaxUploadBytes {
-		return nil, apperr.ErrFileTooLarge
+		return nil, nil, apperr.ErrFileTooLarge
 	}
 
 	uploadType, ok := allowedMIMEs[in.MIMEType]
 	if !ok {
-		return nil, apperr.ErrUnsupportedFile
+		return nil, nil, apperr.ErrUnsupportedFile
+	}
+
+	// Reject audio and video uploads gracefully since they are coming soon
+	if uploadType == meeting.UploadTypeAudio || uploadType == meeting.UploadTypeVideo {
+		return nil, nil, apperr.ErrAudioVideoUnsupported
 	}
 
 	id := uuid.New()
 	key := fmt.Sprintf("workspaces/%s/meetings/%s_%s", in.WorkspaceID, id, in.FileName)
 
-	fileURL, err := uc.storage.Upload(ctx, key, in.Reader, in.Size, in.MIMEType)
+	// Read all file bytes first so we can use them both for storage and PDF text extraction
+	fileBytes, err := io.ReadAll(in.Reader)
 	if err != nil {
-		return nil, fmt.Errorf("meeting: upload file: %w", err)
+		return nil, nil, fmt.Errorf("meeting: read file bytes: %w", err)
+	}
+
+	storageReader := bytes.NewReader(fileBytes)
+	fileURL, err := uc.storage.Upload(ctx, key, storageReader, in.Size, in.MIMEType)
+	if err != nil {
+		return nil, nil, fmt.Errorf("meeting: upload file: %w", err)
 	}
 
 	uploadedBy := &in.UploadedBy
@@ -73,11 +96,117 @@ func (uc *UseCase) Upload(ctx context.Context, in UploadInput) (*meeting.Meeting
 		CreatedAt:       time.Now(),
 	}
 
-	if err := uc.repo.Create(ctx, m); err != nil {
-		return nil, fmt.Errorf("meeting: create record: %w", err)
+	// For PDF files, extract text and generate analysis via Ollama synchronously
+	if uploadType == meeting.UploadTypePDF {
+		started := time.Now()
+		m.ProcessingStartedAt = &started
+		m.Status = meeting.StatusProcessing
+
+		extractorReader := bytes.NewReader(fileBytes)
+		txt, err := uc.pdfExtractor.Extract(ctx, extractorReader, in.FileName)
+		if err != nil {
+			m.Status = meeting.StatusFailed
+			_ = uc.repo.Create(ctx, m)
+			return nil, nil, fmt.Errorf("meeting: extract pdf text: %w", err)
+		}
+
+		m.Transcript = &txt
+
+		aiResult, err := uc.aiUC.GenerateMeetingAnalysis(ctx, txt)
+		if err != nil {
+			m.Status = meeting.StatusFailed
+			_ = uc.repo.Create(ctx, m)
+			return nil, nil, fmt.Errorf("meeting: ai meeting analysis: %w", err)
+		}
+
+		m.AISummary = &aiResult.Summary
+		m.Status = meeting.StatusCompleted
+		completed := time.Now()
+		m.ProcessingCompletedAt = &completed
+
+		if err := uc.repo.Create(ctx, m); err != nil {
+			return nil, nil, fmt.Errorf("meeting: create record: %w", err)
+		}
+
+		// Save tasks
+		for _, t := range aiResult.Tasks {
+			taskID := uuid.New()
+			desc := t.Description
+			priority := t.Priority
+			if priority == "" {
+				priority = "medium"
+			}
+			taskRel := &meeting.TaskRelation{
+				ID:           taskID,
+				WorkspaceID:  in.WorkspaceID,
+				ProjectID:    in.ProjectID,
+				MeetingID:    &id,
+				Title:        t.Title,
+				Description:  desc,
+				Status:       "todo",
+				Priority:     priority,
+				AIGenerated:  true,
+				AIConfidence: 92.0,
+			}
+			_ = uc.repo.CreateTask(ctx, taskRel)
+		}
+
+		// Save decisions
+		for _, d := range aiResult.Decisions {
+			decID := uuid.New()
+			decRel := &meeting.DecisionRelation{
+				ID:           decID,
+				WorkspaceID:  in.WorkspaceID,
+				ProjectID:    in.ProjectID,
+				MeetingID:    id,
+				DecisionText: d.Description,
+			}
+			_ = uc.repo.CreateDecision(ctx, decRel)
+		}
+
+		// Save blockers/risks
+		for _, r := range aiResult.Risks {
+			blockerID := uuid.New()
+			sev := r.Severity
+			if sev == "" {
+				sev = "medium"
+			}
+			blockRel := &meeting.BlockerRelation{
+				ID:          blockerID,
+				WorkspaceID: in.WorkspaceID,
+				ProjectID:   in.ProjectID,
+				MeetingID:   id,
+				BlockerText: r.Description,
+				Severity:    sev,
+				Resolved:    false,
+			}
+			_ = uc.repo.CreateBlocker(ctx, blockRel)
+		}
+
+		// Save document relation
+		docID := uuid.New()
+		docTitle := fmt.Sprintf("%s - Sprint Plan", in.Title)
+		docRel := &meeting.DocumentRelation{
+			ID:            docID,
+			WorkspaceID:   in.WorkspaceID,
+			ProjectID:     in.ProjectID,
+			MeetingID:     &id,
+			Title:         docTitle,
+			Type:          "sprint_plan",
+			Content:       aiResult.ProjectDocumentation,
+			GeneratedByAI: true,
+		}
+		_ = uc.repo.CreateDocument(ctx, docRel)
+
+		return m, aiResult, nil
+
+	} else {
+		if err := uc.repo.Create(ctx, m); err != nil {
+			return nil, nil, fmt.Errorf("meeting: create record: %w", err)
+		}
 	}
 
-	return m, nil
+	return m, nil, nil
 }
 
 func (uc *UseCase) GetByID(ctx context.Context, id uuid.UUID) (*meeting.Meeting, error) {

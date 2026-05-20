@@ -171,3 +171,44 @@ func (r *MeetingRepository) scanMeetings(ctx context.Context, q string, args ...
 	}
 	return result, nil
 }
+
+func (r *MeetingRepository) CreateTask(ctx context.Context, t *meeting.TaskRelation) error {
+	q := `INSERT INTO tasks (id, workspace_id, project_id, meeting_id, title, description, status, priority, due_date, ai_generated, ai_confidence, assigned_to, created_at, updated_at)
+		  VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW(), NOW())`
+	_, err := r.db.Exec(ctx, q, t.ID, t.WorkspaceID, t.ProjectID, t.MeetingID, t.Title, t.Description, t.Status, t.Priority, t.DueDate, t.AIGenerated, t.AIConfidence, t.AssignedTo)
+	if err != nil {
+		return fmt.Errorf("meeting repo: create task: %w", err)
+	}
+	return nil
+}
+
+func (r *MeetingRepository) CreateDecision(ctx context.Context, d *meeting.DecisionRelation) error {
+	q := `INSERT INTO decisions (id, workspace_id, project_id, meeting_id, decision_text, created_at)
+		  VALUES ($1, $2, $3, $4, $5, NOW())`
+	_, err := r.db.Exec(ctx, q, d.ID, d.WorkspaceID, d.ProjectID, d.MeetingID, d.DecisionText)
+	if err != nil {
+		return fmt.Errorf("meeting repo: create decision: %w", err)
+	}
+	return nil
+}
+
+func (r *MeetingRepository) CreateBlocker(ctx context.Context, b *meeting.BlockerRelation) error {
+	q := `INSERT INTO blockers (id, workspace_id, project_id, meeting_id, blocker_text, severity, resolved, created_at)
+		  VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())`
+	_, err := r.db.Exec(ctx, q, b.ID, b.WorkspaceID, b.ProjectID, b.MeetingID, b.BlockerText, b.Severity, b.Resolved)
+	if err != nil {
+		return fmt.Errorf("meeting repo: create blocker: %w", err)
+	}
+	return nil
+}
+
+func (r *MeetingRepository) CreateDocument(ctx context.Context, d *meeting.DocumentRelation) error {
+	q := `INSERT INTO documents (id, workspace_id, project_id, meeting_id, title, type, content, generated_by_ai, created_at, updated_at)
+		  VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW(), NOW())`
+	_, err := r.db.Exec(ctx, q, d.ID, d.WorkspaceID, d.ProjectID, d.MeetingID, d.Title, d.Type, d.Content, d.GeneratedByAI)
+	if err != nil {
+		return fmt.Errorf("meeting repo: create document: %w", err)
+	}
+	return nil
+}
+

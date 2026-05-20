@@ -16,8 +16,12 @@ import (
 	"github.com/meetext/backend/internal/infrastructure/db"
 	"github.com/meetext/backend/internal/infrastructure/email"
 	infraoauth "github.com/meetext/backend/internal/infrastructure/oauth"
+	infraollama "github.com/meetext/backend/internal/infrastructure/ollama"
+	infrapdf "github.com/meetext/backend/internal/infrastructure/pdf"
 	"github.com/meetext/backend/internal/infrastructure/storage"
+	infrawhisper "github.com/meetext/backend/internal/infrastructure/whisper"
 	"github.com/meetext/backend/internal/repository/postgres"
+	ucai "github.com/meetext/backend/internal/usecase/ai"
 	ucauth "github.com/meetext/backend/internal/usecase/auth"
 	ucmeeting "github.com/meetext/backend/internal/usecase/meeting"
 	ucworkspace "github.com/meetext/backend/internal/usecase/workspace"
@@ -56,7 +60,6 @@ func New(cfg *config.Config, log zerolog.Logger) (*App, error) {
 	emailSvc := email.NewLogService(log)
 	authUC := ucauth.NewUseCase(userRepo, workspaceRepo, authTokenRepo, jwtSvc, emailSvc, cfg.App.FrontendURL, cfg.Auth.RequireEmailVerified)
 	workspaceUC := ucworkspace.NewUseCase(workspaceRepo)
-	meetingUC := ucmeeting.NewUseCase(meetingRepo, store)
 
 	// OAuth providers
 	googleProvider := infraoauth.NewGoogle(cfg.OAuth)
@@ -79,6 +82,13 @@ func New(cfg *config.Config, log zerolog.Logger) (*App, error) {
 			Msg("app: OAuth provider registered")
 	}
 
+	// AI Providers
+	ollamaProvider := infraollama.NewProvider(cfg.AI, log)
+	whisperProvider := infrawhisper.NewMockProvider(log)
+	aiUC := ucai.NewUseCase(ollamaProvider, log)
+	pdfExtractor := infrapdf.NewExtractor(log)
+	meetingUC := ucmeeting.NewUseCase(meetingRepo, store, aiUC, pdfExtractor)
+
 	// Handlers
 	handlers := router.Handlers{
 		Auth:        handler.NewAuthHandler(authUC, log),
@@ -86,6 +96,7 @@ func New(cfg *config.Config, log zerolog.Logger) (*App, error) {
 		OAuthGitHub: handler.NewOAuthHandler(githubProvider, authUC, cfg.App.FrontendURL, log),
 		Workspace:   handler.NewWorkspaceHandler(workspaceUC),
 		Meeting:     handler.NewMeetingHandler(meetingUC),
+		AI:          handler.NewAIHandler(aiUC, whisperProvider, log),
 	}
 
 	httpHandler := router.New(log, jwtSvc, authTokenRepo, cfg.App.FrontendURL, handlers)

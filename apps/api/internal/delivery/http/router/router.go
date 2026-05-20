@@ -22,6 +22,7 @@ type Handlers struct {
 	OAuthGitHub *handler.OAuthHandler
 	Workspace   *handler.WorkspaceHandler
 	Meeting     *handler.MeetingHandler
+	AI          *handler.AIHandler
 }
 
 func New(log zerolog.Logger, jwt *infraauth.JWTService, sessions authdomain.TokenRepository, frontendURL string, h Handlers) http.Handler {
@@ -84,6 +85,11 @@ func New(log zerolog.Logger, jwt *infraauth.JWTService, sessions authdomain.Toke
 					r.Get("/{meetingID}", h.Meeting.GetByID)
 					r.Delete("/{meetingID}", h.Meeting.Delete)
 				})
+			})
+
+			r.Route("/ai", func(r chi.Router) {
+				r.Post("/analyze-text", h.AI.AnalyzeText)
+				r.Post("/upload", h.AI.Upload)
 			})
 		})
 	})

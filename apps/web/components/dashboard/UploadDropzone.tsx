@@ -2,7 +2,7 @@
 
 import React, { useState, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { UploadCloud, File, Loader2, CheckCircle2, X } from 'lucide-react'
+import { UploadCloud, File, Loader2, CheckCircle2, ShieldCheck, Music, Video, FileText, Link as LinkIcon } from 'lucide-react'
 
 type UploadState = 'idle' | 'uploading' | 'processing' | 'complete'
 
@@ -14,16 +14,14 @@ export function UploadDropzone() {
     setState('uploading')
     setProgress(0)
     
-    // Simulate upload progress
     const interval = setInterval(() => {
       setProgress((p) => {
         if (p >= 100) {
           clearInterval(interval)
           setState('processing')
-          // Simulate processing time
           setTimeout(() => {
             setState('complete')
-            setTimeout(() => setState('idle'), 3000) // Reset after 3s
+            setTimeout(() => setState('idle'), 3000)
           }, 2000)
           return 100
         }
@@ -32,19 +30,14 @@ export function UploadDropzone() {
     }, 100)
   }, [])
 
-  const handleDragOver = (e: React.DragEvent) => {
-    e.preventDefault()
-  }
-
+  const handleDragOver = (e: React.DragEvent) => e.preventDefault()
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault()
-    if (state === 'idle') {
-      simulateUpload()
-    }
+    if (state === 'idle') simulateUpload()
   }
 
   return (
-    <div className="w-full max-w-3xl rounded-2xl border border-zinc-200 bg-white p-8 shadow-sm">
+    <div className="w-full">
       <AnimatePresence mode="wait">
         {state === 'idle' && (
           <motion.div
@@ -52,16 +45,44 @@ export function UploadDropzone() {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            onDragOver={handleDragOver}
-            onDrop={handleDrop}
-            className="group relative flex cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed border-zinc-200 bg-zinc-50/50 py-16 transition-colors hover:border-zinc-300 hover:bg-zinc-50"
-            onClick={simulateUpload}
+            className="flex flex-col items-center"
           >
-            <div className="mb-4 rounded-full bg-zinc-100 p-4 text-zinc-500 transition-transform group-hover:scale-105">
-              <UploadCloud className="h-8 w-8" />
+            <div
+              onDragOver={handleDragOver}
+              onDrop={handleDrop}
+              onClick={simulateUpload}
+              className="group w-full cursor-pointer rounded-2xl border-2 border-dashed border-zinc-200 bg-zinc-50/50 py-24 text-center transition-colors hover:border-zinc-300 hover:bg-zinc-50"
+            >
+              <div className="mb-6 inline-flex items-center justify-center rounded-2xl bg-zinc-100 p-5 text-zinc-900 transition-transform group-hover:scale-105">
+                <UploadCloud className="h-10 w-10" />
+              </div>
+              <h3 className="mb-2 text-2xl font-semibold text-zinc-950">Drop your meeting file here</h3>
+              <p className="mb-10 text-base text-zinc-500">Audio, video, PDF, or paste a meeting URL</p>
+
+              <div className="mb-10 flex flex-wrap justify-center gap-4 px-6">
+                <button className="flex items-center gap-2 rounded-lg border border-zinc-200 bg-white px-5 py-2.5 text-sm font-medium text-zinc-700 shadow-sm transition hover:bg-zinc-50 hover:text-zinc-900" onClick={(e) => e.stopPropagation()}>
+                  <Music className="h-4 w-4" /> Audio
+                </button>
+                <button className="flex items-center gap-2 rounded-lg border border-zinc-200 bg-white px-5 py-2.5 text-sm font-medium text-zinc-700 shadow-sm transition hover:bg-zinc-50 hover:text-zinc-900" onClick={(e) => e.stopPropagation()}>
+                  <Video className="h-4 w-4" /> Video
+                </button>
+                <button className="flex items-center gap-2 rounded-lg border border-zinc-200 bg-white px-5 py-2.5 text-sm font-medium text-zinc-700 shadow-sm transition hover:bg-zinc-50 hover:text-zinc-900" onClick={(e) => e.stopPropagation()}>
+                  <FileText className="h-4 w-4" /> PDF
+                </button>
+                <button className="flex items-center gap-2 rounded-lg border border-zinc-200 bg-white px-5 py-2.5 text-sm font-medium text-zinc-700 shadow-sm transition hover:bg-zinc-50 hover:text-zinc-900" onClick={(e) => e.stopPropagation()}>
+                  <LinkIcon className="h-4 w-4" /> Paste URL
+                </button>
+              </div>
+
+              <button className="inline-flex items-center gap-2 rounded-lg bg-zinc-950 px-8 py-3.5 text-base font-medium text-white shadow-sm transition hover:bg-zinc-800">
+                <File className="h-5 w-5" /> Browse Files
+              </button>
             </div>
-            <h3 className="mb-1 text-lg font-semibold text-zinc-900">Upload a meeting recording</h3>
-            <p className="text-sm text-zinc-500">Drag and drop audio, video, or PDF files here, or click to browse.</p>
+            
+            <div className="mt-8 flex items-center gap-2 text-sm font-medium text-zinc-500">
+              <ShieldCheck className="h-4 w-4" />
+              Your data is secure and encrypted
+            </div>
           </motion.div>
         )}
 
@@ -71,7 +92,7 @@ export function UploadDropzone() {
             initial={{ opacity: 0, scale: 0.95 }}
             animate={{ opacity: 1, scale: 1 }}
             exit={{ opacity: 0, scale: 0.95 }}
-            className="flex flex-col items-center py-12"
+            className="flex flex-col items-center py-16"
           >
             <File className="mb-6 h-12 w-12 text-zinc-400" />
             <div className="mb-2 text-sm font-medium text-zinc-900">Uploading meeting_recording.mp4...</div>

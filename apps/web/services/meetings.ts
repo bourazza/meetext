@@ -10,25 +10,30 @@ export interface UploadMeetingInput {
   onProgress?: (progress: number) => void
 }
 
-export async function uploadMeeting(input: UploadMeetingInput): Promise<Meeting> {
+export async function uploadMeeting(input: UploadMeetingInput): Promise<{ meeting: Meeting; analysis?: any }> {
   const form = new FormData()
   form.append('file', input.file)
   if (input.title) form.append('title', input.title)
   if (input.projectId) form.append('project_id', input.projectId)
   if (input.clientId) form.append('client_id', input.clientId)
 
-  const { data } = await api.post<{ success: boolean; data: Meeting }>(
+  const { data } = await api.post<{ success: boolean; data: { meeting: Meeting; analysis?: any } | Meeting }>(
     `/workspaces/${input.workspaceId}/meetings`,
     form,
     {
       headers: { 'Content-Type': 'multipart/form-data' },
+      timeout: 120000,
       onUploadProgress: (event) => {
         if (!input.onProgress || !event.total) return
         input.onProgress(Math.round((event.loaded / event.total) * 100))
       },
     }
   )
-  return data.data
+
+  if (data.data && 'meeting' in data.data) {
+    return data.data
+  }
+  return { meeting: data.data as Meeting }
 }
 
 export async function getMeetings(

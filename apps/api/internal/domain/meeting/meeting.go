@@ -53,6 +53,50 @@ type Participant struct {
 	CreatedAt        time.Time `json:"created_at"`
 }
 
+type TaskRelation struct {
+	ID           uuid.UUID
+	WorkspaceID  uuid.UUID
+	ProjectID    *uuid.UUID
+	MeetingID    *uuid.UUID
+	Title        string
+	Description  string
+	Status       string
+	Priority     string
+	DueDate      *time.Time
+	AIGenerated  bool
+	AIConfidence float64
+	AssignedTo   *uuid.UUID
+}
+
+type DecisionRelation struct {
+	ID           uuid.UUID
+	WorkspaceID  uuid.UUID
+	ProjectID    *uuid.UUID
+	MeetingID    uuid.UUID
+	DecisionText string
+}
+
+type BlockerRelation struct {
+	ID          uuid.UUID
+	WorkspaceID uuid.UUID
+	ProjectID   *uuid.UUID
+	MeetingID   uuid.UUID
+	BlockerText string
+	Severity    string
+	Resolved    bool
+}
+
+type DocumentRelation struct {
+	ID            uuid.UUID
+	WorkspaceID   uuid.UUID
+	ProjectID     *uuid.UUID
+	MeetingID     *uuid.UUID
+	Title         string
+	Type          string
+	Content       string
+	GeneratedByAI bool
+}
+
 type Repository interface {
 	Create(ctx context.Context, m *Meeting) error
 	GetByID(ctx context.Context, id uuid.UUID) (*Meeting, error)
@@ -64,4 +108,10 @@ type Repository interface {
 
 	AddParticipant(ctx context.Context, p *Participant) error
 	ListParticipants(ctx context.Context, meetingID uuid.UUID) ([]*Participant, error)
+
+	CreateTask(ctx context.Context, t *TaskRelation) error
+	CreateDecision(ctx context.Context, d *DecisionRelation) error
+	CreateBlocker(ctx context.Context, b *BlockerRelation) error
+	CreateDocument(ctx context.Context, d *DocumentRelation) error
 }
+
