@@ -11,7 +11,7 @@ import {
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { useSession } from '@/hooks/use-session'
-import { uploadMeeting } from '@/services/meetings'
+import { uploadMeeting, getMeetingStatus } from '@/services/meetings'
 import { useRouter } from 'next/navigation'
 
 type ProcessState = 'idle' | 'uploading' | 'transcribing' | 'analyzing' | 'extracting' | 'summarizing' | 'complete'
@@ -174,11 +174,8 @@ export default function DashboardPage() {
   const handleFileSelected = async (file: File | null) => {
     if (!file) return
 
-    // 1. Validation
     if (file.type.startsWith('audio/') || file.type.startsWith('video/') || file.name.endsWith('.mp3') || file.name.endsWith('.wav') || file.name.endsWith('.mp4')) {
-      toast.info('Coming Soon: Audio and video uploads are not supported in the MVP yet. Please upload a PDF file.', {
-        duration: 5000,
-      })
+      toast.info('Coming Soon: Audio and video uploads are not supported yet. Please upload a PDF file.', { duration: 5000 })
       return
     }
 
@@ -187,8 +184,8 @@ export default function DashboardPage() {
       return
     }
 
-    if (file.size > 2 * 1024 * 1024 * 1024) {
-      toast.error('File size exceeds the 2GB limit.')
+    if (file.size > 250 * 1024 * 1024) {
+      toast.error('File size exceeds the 250MB limit.')
       return
     }
 
@@ -204,54 +201,58 @@ export default function DashboardPage() {
     setActiveStep(1)
 
     try {
-      const uploadPromise = uploadMeeting({
+      // Step 1: Upload file — returns immediately with meeting.status = 'processing'
+      const { meeting: uploadedMeeting } = await uploadMeeting({
         workspaceId: workspace.id,
         file,
         title: file.name.replace(/\.[^/.]+$/, ''),
-        onProgress: (p) => {
-          setProgress(Math.round(p * 0.95))
-        }
+        onProgress: (p) => setProgress(Math.round(p * 0.6)),
       })
 
-      const res = await uploadPromise
-      setProgress(100)
-
-      setProcessState('transcribing')
-      setActiveStep(2)
-      setProgress(15)
-      await new Promise(resolve => setTimeout(resolve, 800))
-
+      setProgress(60)
       setProcessState('analyzing')
       setActiveStep(3)
-      setProgress(40)
-      await new Promise(resolve => setTimeout(resolve, 1000))
 
-      setProcessState('extracting')
-      setActiveStep(4)
-      setProgress(70)
-      await new Promise(resolve => setTimeout(resolve, 800))
+      // Step 2: Poll /status until completed or failed
+      const pollInterval = 4000
+      const maxWaitMs = 10 * 60 * 1000 // 10 minutes max
+      const startedAt = Date.now()
 
-      setProcessState('summarizing')
-      setActiveStep(5)
-      setProgress(90)
-      await new Promise(resolve => setTimeout(resolve, 600))
+      await new Promise<void>((resolve, reject) => {
+        const poll = async () => {
+          if (Date.now() - startedAt > maxWaitMs) {
+            reject(new Error('AI processing timed out after 10 minutes.'))
+            return
+          }
+          try {
+            const status = await getMeetingStatus(workspace.id, uploadedMeeting.id)
 
-      if (res.analysis) {
-        setResults(res.analysis)
-      } else {
-        toast.error("Analysis not found in response, showing fallback results.")
-      }
+            if (status.status === 'completed') {
+              setProgress(100)
+              resolve()
+            } else if (status.status === 'failed') {
+              reject(new Error('AI processing failed on the server.'))
+            } else {
+              // Still processing — animate progress and poll again
+              setProgress(p => Math.min(p + 5, 95))
+              setTimeout(poll, pollInterval)
+            }
+          } catch {
+            setTimeout(poll, pollInterval)
+          }
+        }
+        setTimeout(poll, pollInterval)
+      })
 
       setProcessState('complete')
       setActiveStep(6)
-      toast.success("AI Generation Complete!", {
-        description: "Extracted tasks, decisions, and summaries are ready."
+      toast.success('AI Generation Complete!', {
+        description: 'Extracted tasks, decisions, and summaries are ready.',
       })
 
     } catch (err: any) {
       setProcessState('idle')
-      console.error(err)
-      const errMsg = err.response?.data?.error?.message || err.message || "Failed to process PDF."
+      const errMsg = err?.response?.data?.error?.message || err?.message || 'Failed to process PDF.'
       toast.error(`Upload failed: ${errMsg}`)
     }
   }
@@ -353,13 +354,13 @@ export default function DashboardPage() {
     
     markdown += `## Action Items\n`
     results.tasks.forEach(t => {
-      markdown += `* **[${t.priority.toUpperCase()}]** ${t.title} - Assigned to: ${t.assignee} (Due: ${t.due_date})\n  _${t.description}_\n`
+      markdown += `* **[${(t.priority ?? 'medium').toUpperCase()}]** ${t.title} - Assigned to: ${t.assignee} (Due: ${t.due_date})\n  _${t.description}_\n`
     })
     markdown += `\n`
 
     markdown += `## Decisions Made\n`
     results.decisions.forEach(d => {
-      markdown += `* ${d.description} (Made by: ${d.made_by})\n`
+      markdown += `* ${d.decision} (Made by: ${d.made_by})\n`
     })
 
     const blob = new Blob([markdown], { type: 'text/markdown' })
@@ -400,13 +401,13 @@ export default function DashboardPage() {
     } else if (section === 'decisions' && index !== undefined) {
       setResults(prev => {
         const updated = [...prev.decisions]
-        updated[index] = { ...updated[index], description: editValue }
+        updated[index] = { ...updated[index], decision: editValue }
         return { ...prev, decisions: updated }
       })
     } else if (section === 'risks' && index !== undefined && field) {
       setResults(prev => {
         const updated = [...prev.risks]
-        updated[index] = { ...updated[index], [field]: editValue }
+        updated[index] = { ...updated[index], risk: editValue }
         return { ...prev, risks: updated }
       })
     }
@@ -972,14 +973,14 @@ export default function DashboardPage() {
                           <Check className="h-3.5 w-3.5" />
                         </div>
                         <div className="flex-1">
-                          <p className="text-xs text-zinc-650 font-medium leading-relaxed">{decision.description}</p>
+                          <p className="text-xs text-zinc-650 font-medium leading-relaxed">{decision.decision}</p>
                           <span className="inline-block mt-2 rounded bg-zinc-100 px-1.5 py-0.5 text-[9px] font-bold text-zinc-550">
                             By: {decision.made_by}
                           </span>
                         </div>
                         <div className="opacity-0 group-hover:opacity-100 transition-opacity">
                           <button 
-                            onClick={() => startEditing('decisions', decision.description, i)}
+                            onClick={() => startEditing('decisions', decision.decision, i)}
                             className="p-1 rounded text-zinc-400 hover:text-zinc-955"
                           >
                             <Edit2 className="h-3 w-3" />
@@ -1020,7 +1021,7 @@ export default function DashboardPage() {
                                 Severity: {risk.severity}
                               </span>
                             </div>
-                            <p className="text-xs font-bold text-zinc-900 mt-1.5">{risk.description}</p>
+                            <p className="text-xs font-bold text-zinc-900 mt-1.5">{risk.risk}</p>
                             <div className="mt-2.5 rounded bg-zinc-100 px-3 py-2 text-[10px] text-zinc-650 border border-zinc-200">
                               <span className="font-bold text-zinc-805">Mitigation:</span> {risk.mitigation}
                             </div>
@@ -1028,7 +1029,7 @@ export default function DashboardPage() {
                           
                           <div className="opacity-0 group-hover:opacity-100 transition-opacity">
                             <button 
-                              onClick={() => startEditing('risks', risk.description, i, 'description')}
+                              onClick={() => startEditing('risks', risk.risk, i, 'risk')}
                               className="p-1 rounded text-zinc-400 hover:text-zinc-950"
                             >
                               <Edit2 className="h-3 w-3" />

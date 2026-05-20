@@ -47,7 +47,6 @@ func New(log zerolog.Logger, jwt *infraauth.JWTService, sessions authdomain.Toke
 
 	r.Route("/api/v1", func(r chi.Router) {
 		r.Route("/auth", func(r chi.Router) {
-			// Password auth
 			r.Post("/register", h.Auth.Register)
 			r.Post("/login", h.Auth.Login)
 			r.Post("/refresh", h.Auth.Refresh)
@@ -57,16 +56,13 @@ func New(log zerolog.Logger, jwt *infraauth.JWTService, sessions authdomain.Toke
 			r.Post("/verify-email", h.Auth.VerifyEmail)
 			r.Post("/resend-verification", h.Auth.ResendVerification)
 
-			// OAuth — Google
 			r.Get("/oauth/google", h.OAuthGoogle.Redirect)
 			r.Get("/oauth/google/callback", h.OAuthGoogle.Callback)
 
-			// OAuth — GitHub
 			r.Get("/oauth/github", h.OAuthGitHub.Redirect)
 			r.Get("/oauth/github/callback", h.OAuthGitHub.Callback)
 		})
 
-		// Protected routes
 		r.Group(func(r chi.Router) {
 			r.Use(httpmiddleware.Auth(jwt, sessions, log))
 
@@ -83,6 +79,7 @@ func New(log zerolog.Logger, jwt *infraauth.JWTService, sessions authdomain.Toke
 					r.Post("/", h.Meeting.Upload)
 					r.Get("/", h.Meeting.List)
 					r.Get("/{meetingID}", h.Meeting.GetByID)
+					r.Get("/{meetingID}/status", h.Meeting.GetStatus)
 					r.Delete("/{meetingID}", h.Meeting.Delete)
 				})
 			})

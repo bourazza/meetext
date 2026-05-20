@@ -20,6 +20,7 @@ SHELL := /bin/bash
 	local-setup local-migrate local-run local-reset local-dev \
 	web-install web-dev web-build web-start web-lint \
 	docker-up docker-down docker-logs docker-reset docker-migrate docker-db-only \
+	ollama-start ollama-pull ollama-status \
 	build test test-cover lint tidy fmt vet \
 	migrate-up migrate-down migrate-create sqlc sqlc-verify clean
 
@@ -212,6 +213,25 @@ docker-reset:
 
 docker-db-only:
 	docker compose up -d postgres redis
+
+# ─────────────────────────────────────────────────────────────
+# OLLAMA
+# ─────────────────────────────────────────────────────────────
+
+ollama-start: ## Start Ollama and pull model (local dev)
+	@./scripts/start-local.sh
+
+ollama-pull: ## Pull the AI model
+	@ollama pull llama3.2:1b
+
+ollama-status: ## Check Ollama status
+	@echo "→ Checking Ollama..."
+	@curl -sf http://localhost:11434/api/tags >/dev/null 2>&1 && \
+		echo "✓ Ollama is running" || \
+		echo "✗ Ollama is not running. Run: make ollama-start"
+	@echo ""
+	@echo "→ Installed models:"
+	@ollama list 2>/dev/null || echo "  (none - run 'make ollama-pull')"
 
 # ─────────────────────────────────────────────────────────────
 # BUILD

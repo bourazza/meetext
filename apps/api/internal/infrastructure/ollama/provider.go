@@ -14,6 +14,11 @@ import (
 	"github.com/rs/zerolog"
 )
 
+const (
+	defaultTimeout = 5 * time.Minute
+	maxRetries     = 2
+)
+
 type Provider struct {
 	baseURL string
 	model   string
@@ -30,10 +35,8 @@ type generateRequest struct {
 }
 
 type generateResponse struct {
-	Model     string `json:"model"`
-	CreatedAt string `json:"created_at"`
-	Response  string `json:"response"`
-	Done      bool   `json:"done"`
+	Response string `json:"response"`
+	Done     bool   `json:"done"`
 }
 
 func NewProvider(cfg config.AIConfig, log zerolog.Logger) *Provider {
@@ -43,109 +46,103 @@ func NewProvider(cfg config.AIConfig, log zerolog.Logger) *Provider {
 	}
 	model := cfg.OllamaModel
 	if model == "" {
-		model = "llama3"
+		model = "llama3.2:1b"
 	}
-
 	return &Provider{
 		baseURL: baseURL,
 		model:   model,
-		client:  &http.Client{},
+		client:  &http.Client{Timeout: defaultTimeout + 10*time.Second},
 		log:     log.With().Str("component", "ollama_provider").Logger(),
 	}
 }
 
-// GenerateJSON sends a prompt to Ollama enforcing JSON output.
+// GenerateJSON sends a prompt to Ollama and returns a validated JSON string.
 func (p *Provider) GenerateJSON(ctx context.Context, prompt string) (string, error) {
 	reqBody := generateRequest{
 		Model:  p.model,
 		Prompt: prompt,
-		Format: "json", // Enforce JSON output at the Ollama level
+		Format: "json",
 		Stream: false,
 		Options: map[string]interface{}{
-			"num_ctx": 131072, // Force massive 128k context window for long transcripts
+			"num_ctx":     4096,
+			"temperature": 0.1,
 		},
 	}
 
 	jsonData, err := json.Marshal(reqBody)
 	if err != nil {
-		return "", fmt.Errorf("failed to marshal request: %w", err)
+		return "", fmt.Errorf("ollama: marshal request: %w", err)
 	}
 
 	url := fmt.Sprintf("%s/api/generate", p.baseURL)
-	
-	maxRetries := 3
 	var lastErr error
 
 	for attempt := 1; attempt <= maxRetries; attempt++ {
-		p.log.Debug().Str("url", url).Str("model", p.model).Int("attempt", attempt).Msg("sending request to ollama")
-		
-		// Enforce a strict 3600s timeout specifically for massive LLM inference calls
-		reqCtx, cancel := context.WithTimeout(ctx, 3600*time.Second)
+		reqCtx, cancel := context.WithTimeout(ctx, defaultTimeout)
 		req, err := http.NewRequestWithContext(reqCtx, http.MethodPost, url, bytes.NewBuffer(jsonData))
 		if err != nil {
 			cancel()
-			return "", fmt.Errorf("failed to create request: %w", err)
+			return "", fmt.Errorf("ollama: create request: %w", err)
 		}
 		req.Header.Set("Content-Type", "application/json")
 
+		p.log.Info().Str("model", p.model).Int("attempt", attempt).Msg("ollama: sending request")
+
 		resp, err := p.client.Do(req)
+		cancel()
 		if err != nil {
-			cancel()
-			lastErr = fmt.Errorf("failed to execute request on attempt %d: %w", attempt, err)
-			p.log.Warn().Err(lastErr).Msg("ollama request failed, retrying...")
-			time.Sleep(2 * time.Second)
+			lastErr = fmt.Errorf("ollama: request attempt %d: %w", attempt, err)
+			p.log.Warn().Err(lastErr).Msg("ollama: request failed, retrying")
+			time.Sleep(time.Duration(attempt) * 2 * time.Second)
+			continue
+		}
+
+		body, err := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if err != nil {
+			lastErr = fmt.Errorf("ollama: read body attempt %d: %w", attempt, err)
 			continue
 		}
 
 		if resp.StatusCode != http.StatusOK {
-			bodyBytes, _ := io.ReadAll(resp.Body)
-			resp.Body.Close()
-			cancel()
-			lastErr = fmt.Errorf("ollama API error: status %d, response: %s", resp.StatusCode, string(bodyBytes))
-			p.log.Warn().Err(lastErr).Msg("ollama returned non-200 status, retrying...")
-			time.Sleep(2 * time.Second)
+			lastErr = fmt.Errorf("ollama: status %d: %s", resp.StatusCode, string(body))
+			p.log.Warn().Err(lastErr).Msg("ollama: non-200 response")
+			time.Sleep(time.Duration(attempt) * 2 * time.Second)
 			continue
 		}
 
 		var genResp generateResponse
-		err = json.NewDecoder(resp.Body).Decode(&genResp)
-		resp.Body.Close()
-		cancel()
-
-		if err != nil {
-			lastErr = fmt.Errorf("failed to decode response on attempt %d: %w", attempt, err)
-			p.log.Warn().Err(lastErr).Msg("failed to decode ollama response, retrying...")
-			time.Sleep(2 * time.Second)
+		if err := json.Unmarshal(body, &genResp); err != nil {
+			lastErr = fmt.Errorf("ollama: decode response attempt %d: %w", attempt, err)
 			continue
 		}
 
-		cleanJSON := sanitizeJSON(genResp.Response)
-		
-		// Structured parsing validation: verify the LLM gave us valid JSON.
-		if !json.Valid([]byte(cleanJSON)) {
-			lastErr = fmt.Errorf("ollama returned invalid json on attempt %d", attempt)
-			p.log.Warn().Err(lastErr).Msg("invalid json structure, retrying...")
-			time.Sleep(2 * time.Second)
+		clean := sanitizeJSON(genResp.Response)
+		if !json.Valid([]byte(clean)) {
+			lastErr = fmt.Errorf("ollama: invalid JSON in response attempt %d", attempt)
+			p.log.Warn().Str("raw", clean[:min(200, len(clean))]).Msg("ollama: invalid json, retrying")
+			time.Sleep(time.Duration(attempt) * 2 * time.Second)
 			continue
 		}
 
-		p.log.Info().Msg("ollama generation successful")
-		return cleanJSON, nil
+		p.log.Info().Msg("ollama: generation successful")
+		return clean, nil
 	}
 
-	return "", fmt.Errorf("failed to generate JSON after %d attempts. Last error: %w", maxRetries, lastErr)
+	return "", fmt.Errorf("ollama: failed after %d attempts: %w", maxRetries, lastErr)
 }
 
-// sanitizeJSON acts as a hallucination protection layer, trimming markdown block backticks that LLMs often incorrectly inject.
 func sanitizeJSON(input string) string {
 	s := strings.TrimSpace(input)
-	if strings.HasPrefix(s, "```json") {
-		s = strings.TrimPrefix(s, "```json")
-	} else if strings.HasPrefix(s, "```") {
-		s = strings.TrimPrefix(s, "```")
-	}
-	if strings.HasSuffix(s, "```") {
-		s = strings.TrimSuffix(s, "```")
-	}
+	s = strings.TrimPrefix(s, "```json")
+	s = strings.TrimPrefix(s, "```")
+	s = strings.TrimSuffix(s, "```")
 	return strings.TrimSpace(s)
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }

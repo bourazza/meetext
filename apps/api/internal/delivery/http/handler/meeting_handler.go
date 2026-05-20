@@ -10,15 +10,16 @@ import (
 	"github.com/meetext/backend/pkg/apperr"
 	"github.com/meetext/backend/pkg/constants"
 	"github.com/meetext/backend/pkg/response"
-	"github.com/rs/zerolog/log"
+	"github.com/rs/zerolog"
 )
 
 type MeetingHandler struct {
-	uc *meeting.UseCase
+	uc  *meeting.UseCase
+	log zerolog.Logger
 }
 
-func NewMeetingHandler(uc *meeting.UseCase) *MeetingHandler {
-	return &MeetingHandler{uc: uc}
+func NewMeetingHandler(uc *meeting.UseCase, log zerolog.Logger) *MeetingHandler {
+	return &MeetingHandler{uc: uc, log: log.With().Str("component", "meeting_handler").Logger()}
 }
 
 // POST /api/v1/workspaces/{workspaceID}/meetings
@@ -32,7 +33,7 @@ func (h *MeetingHandler) Upload(w http.ResponseWriter, r *http.Request) {
 	userID, _ := r.Context().Value(constants.CtxUserID).(uuid.UUID)
 
 	if err := r.ParseMultipartForm(constants.MaxUploadBytes); err != nil {
-		log.Error().Err(err).Msg("ParseMultipartForm failed")
+		h.log.Error().Err(err).Str("workspace_id", workspaceID.String()).Msg("meeting: parse multipart form failed")
 		response.Error(w, apperr.Wrap(err, http.StatusBadRequest, "BAD_REQUEST", "Failed to parse multipart form"))
 		return
 	}
@@ -51,21 +52,26 @@ func (h *MeetingHandler) Upload(w http.ResponseWriter, r *http.Request) {
 
 	var projectID *uuid.UUID
 	if raw := r.FormValue("project_id"); raw != "" {
-		pid, err := uuid.Parse(raw)
-		if err == nil {
+		if pid, err := uuid.Parse(raw); err == nil {
 			projectID = &pid
 		}
 	}
 
 	var clientID *uuid.UUID
 	if raw := r.FormValue("client_id"); raw != "" {
-		cid, err := uuid.Parse(raw)
-		if err == nil {
+		if cid, err := uuid.Parse(raw); err == nil {
 			clientID = &cid
 		}
 	}
 
-	m, aiRes, err := h.uc.Upload(r.Context(), meeting.UploadInput{
+	h.log.Info().
+		Str("workspace_id", workspaceID.String()).
+		Str("filename", header.Filename).
+		Str("mime", header.Header.Get("Content-Type")).
+		Int64("size", header.Size).
+		Msg("meeting: upload request received")
+
+	m, err := h.uc.Upload(r.Context(), meeting.UploadInput{
 		WorkspaceID: workspaceID,
 		ProjectID:   projectID,
 		ClientID:    clientID,
@@ -77,21 +83,16 @@ func (h *MeetingHandler) Upload(w http.ResponseWriter, r *http.Request) {
 		Reader:      file,
 	})
 	if err != nil {
-		log.Error().Err(err).Msg("meeting: upload failed")
+		h.log.Error().Err(err).Str("workspace_id", workspaceID.String()).Msg("meeting: upload failed")
 		response.Error(w, err)
 		return
 	}
 
-	if aiRes != nil {
-		response.Created(w, map[string]interface{}{
-			"meeting":  m,
-			"analysis": aiRes,
-		})
-	} else {
-		response.Created(w, map[string]interface{}{
-			"meeting": m,
-		})
-	}
+	h.log.Info().Str("meeting_id", m.ID.String()).Str("status", string(m.Status)).Msg("meeting: upload accepted, processing async")
+	response.Created(w, map[string]interface{}{
+		"meeting": m,
+		"message": "Meeting uploaded. AI processing has started in the background.",
+	})
 }
 
 // GET /api/v1/workspaces/{workspaceID}/meetings
@@ -127,6 +128,28 @@ func (h *MeetingHandler) GetByID(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	response.OK(w, m)
+}
+
+// GET /api/v1/workspaces/{workspaceID}/meetings/{meetingID}/status
+// Lightweight polling endpoint — returns only id + status + summary.
+func (h *MeetingHandler) GetStatus(w http.ResponseWriter, r *http.Request) {
+	meetingID, err := uuid.Parse(chi.URLParam(r, "meetingID"))
+	if err != nil {
+		response.Error(w, apperr.ErrBadRequest)
+		return
+	}
+
+	m, err := h.uc.GetByID(r.Context(), meetingID)
+	if err != nil {
+		response.Error(w, err)
+		return
+	}
+
+	response.OK(w, map[string]interface{}{
+		"id":         m.ID,
+		"status":     m.Status,
+		"ai_summary": m.AISummary,
+	})
 }
 
 // DELETE /api/v1/workspaces/{workspaceID}/meetings/{meetingID}

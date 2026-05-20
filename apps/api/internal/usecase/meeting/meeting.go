@@ -9,12 +9,13 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/meetext/backend/internal/domain/meeting"
-	domainai "github.com/meetext/backend/internal/domain/ai"
 	"github.com/meetext/backend/internal/infrastructure/pdf"
 	"github.com/meetext/backend/internal/infrastructure/storage"
 	ucai "github.com/meetext/backend/internal/usecase/ai"
 	"github.com/meetext/backend/pkg/apperr"
 	"github.com/meetext/backend/pkg/constants"
+	"github.com/rs/zerolog"
+	"github.com/rs/zerolog/log"
 )
 
 var allowedMIMEs = map[string]meeting.UploadType{
@@ -41,6 +42,7 @@ type UseCase struct {
 	storage      storage.Provider
 	aiUC         *ucai.UseCase
 	pdfExtractor *pdf.Extractor
+	log          zerolog.Logger
 }
 
 func NewUseCase(repo meeting.Repository, storage storage.Provider, aiUC *ucai.UseCase, pdfExtractor *pdf.Extractor) *UseCase {
@@ -49,164 +51,174 @@ func NewUseCase(repo meeting.Repository, storage storage.Provider, aiUC *ucai.Us
 		storage:      storage,
 		aiUC:         aiUC,
 		pdfExtractor: pdfExtractor,
+		log:          log.With().Str("component", "meeting_usecase").Logger(),
 	}
 }
 
-func (uc *UseCase) Upload(ctx context.Context, in UploadInput) (*meeting.Meeting, *domainai.AIResult, error) {
+// Upload validates, stores the file, saves the meeting record immediately,
+// then kicks off async AI processing. Returns the meeting instantly.
+func (uc *UseCase) Upload(ctx context.Context, in UploadInput) (*meeting.Meeting, error) {
 	if in.Size > constants.MaxUploadBytes {
-		return nil, nil, apperr.ErrFileTooLarge
+		return nil, apperr.ErrFileTooLarge
 	}
 
 	uploadType, ok := allowedMIMEs[in.MIMEType]
 	if !ok {
-		return nil, nil, apperr.ErrUnsupportedFile
+		return nil, apperr.ErrUnsupportedFile
 	}
 
-	// Reject audio and video uploads gracefully since they are coming soon
 	if uploadType == meeting.UploadTypeAudio || uploadType == meeting.UploadTypeVideo {
-		return nil, nil, apperr.ErrAudioVideoUnsupported
+		return nil, apperr.ErrAudioVideoUnsupported
+	}
+
+	fileBytes, err := io.ReadAll(in.Reader)
+	if err != nil {
+		return nil, fmt.Errorf("meeting: read file: %w", err)
 	}
 
 	id := uuid.New()
 	key := fmt.Sprintf("workspaces/%s/meetings/%s_%s", in.WorkspaceID, id, in.FileName)
 
-	// Read all file bytes first so we can use them both for storage and PDF text extraction
-	fileBytes, err := io.ReadAll(in.Reader)
+	fileURL, err := uc.storage.Upload(ctx, key, bytes.NewReader(fileBytes), in.Size, in.MIMEType)
 	if err != nil {
-		return nil, nil, fmt.Errorf("meeting: read file bytes: %w", err)
-	}
-
-	storageReader := bytes.NewReader(fileBytes)
-	fileURL, err := uc.storage.Upload(ctx, key, storageReader, in.Size, in.MIMEType)
-	if err != nil {
-		return nil, nil, fmt.Errorf("meeting: upload file: %w", err)
+		return nil, fmt.Errorf("meeting: upload file: %w", err)
 	}
 
 	uploadedBy := &in.UploadedBy
+	now := time.Now()
 	m := &meeting.Meeting{
-		ID:              id,
-		WorkspaceID:     in.WorkspaceID,
-		ProjectID:       in.ProjectID,
-		ClientID:        in.ClientID,
-		Title:           in.Title,
-		UploadType:      uploadType,
-		OriginalFileURL: fileURL,
-		Status:          meeting.StatusUploaded,
-		UploadedBy:      uploadedBy,
-		CreatedAt:       time.Now(),
+		ID:                  id,
+		WorkspaceID:         in.WorkspaceID,
+		ProjectID:           in.ProjectID,
+		ClientID:            in.ClientID,
+		Title:               in.Title,
+		UploadType:          uploadType,
+		OriginalFileURL:     fileURL,
+		Status:              meeting.StatusProcessing,
+		ProcessingStartedAt: &now,
+		UploadedBy:          uploadedBy,
+		CreatedAt:           now,
 	}
 
-	// For PDF files, extract text and generate analysis via Ollama synchronously
-	if uploadType == meeting.UploadTypePDF {
-		started := time.Now()
-		m.ProcessingStartedAt = &started
-		m.Status = meeting.StatusProcessing
-
-		extractorReader := bytes.NewReader(fileBytes)
-		txt, err := uc.pdfExtractor.Extract(ctx, extractorReader, in.FileName)
-		if err != nil {
-			m.Status = meeting.StatusFailed
-			_ = uc.repo.Create(ctx, m)
-			return nil, nil, fmt.Errorf("meeting: extract pdf text: %w", err)
-		}
-
-		m.Transcript = &txt
-
-		aiResult, err := uc.aiUC.GenerateMeetingAnalysis(ctx, txt)
-		if err != nil {
-			m.Status = meeting.StatusFailed
-			_ = uc.repo.Create(ctx, m)
-			return nil, nil, fmt.Errorf("meeting: ai meeting analysis: %w", err)
-		}
-
-		m.AISummary = &aiResult.Summary
-		m.Status = meeting.StatusCompleted
-		completed := time.Now()
-		m.ProcessingCompletedAt = &completed
-
-		if err := uc.repo.Create(ctx, m); err != nil {
-			return nil, nil, fmt.Errorf("meeting: create record: %w", err)
-		}
-
-		// Save tasks
-		for _, t := range aiResult.Tasks {
-			taskID := uuid.New()
-			desc := t.Description
-			priority := "medium"
-			if t.Priority != nil {
-				priority = *t.Priority
-			}
-			taskRel := &meeting.TaskRelation{
-				ID:           taskID,
-				WorkspaceID:  in.WorkspaceID,
-				ProjectID:    in.ProjectID,
-				MeetingID:    &id,
-				Title:        t.Title,
-				Description:  desc,
-				Status:       "todo",
-				Priority:     priority,
-				AIGenerated:  true,
-				AIConfidence: t.ConfidenceScore,
-			}
-			_ = uc.repo.CreateTask(ctx, taskRel)
-		}
-
-		// Save decisions
-		for _, d := range aiResult.Decisions {
-			decID := uuid.New()
-			decRel := &meeting.DecisionRelation{
-				ID:           decID,
-				WorkspaceID:  in.WorkspaceID,
-				ProjectID:    in.ProjectID,
-				MeetingID:    id,
-				DecisionText: d.Decision,
-			}
-			_ = uc.repo.CreateDecision(ctx, decRel)
-		}
-
-		// Save blockers/risks
-		for _, r := range aiResult.Risks {
-			blockerID := uuid.New()
-			sev := "medium"
-			if r.Severity != nil {
-				sev = *r.Severity
-			}
-			blockRel := &meeting.BlockerRelation{
-				ID:          blockerID,
-				WorkspaceID: in.WorkspaceID,
-				ProjectID:   in.ProjectID,
-				MeetingID:   id,
-				BlockerText: r.Risk,
-				Severity:    sev,
-				Resolved:    false,
-			}
-			_ = uc.repo.CreateBlocker(ctx, blockRel)
-		}
-
-		// Save document relation
-		docID := uuid.New()
-		docTitle := fmt.Sprintf("%s - Sprint Plan", in.Title)
-		docRel := &meeting.DocumentRelation{
-			ID:            docID,
-			WorkspaceID:   in.WorkspaceID,
-			ProjectID:     in.ProjectID,
-			MeetingID:     &id,
-			Title:         docTitle,
-			Type:          "sprint_plan",
-			Content:       aiResult.ProjectDocumentationMarkdown,
-			GeneratedByAI: true,
-		}
-		_ = uc.repo.CreateDocument(ctx, docRel)
-
-		return m, aiResult, nil
-
-	} else {
-		if err := uc.repo.Create(ctx, m); err != nil {
-			return nil, nil, fmt.Errorf("meeting: create record: %w", err)
-		}
+	if err := uc.repo.Create(ctx, m); err != nil {
+		return nil, fmt.Errorf("meeting: create record: %w", err)
 	}
 
-	return m, nil, nil
+	// Kick off async AI processing — do not block the HTTP response
+	go uc.processAsync(m, fileBytes, in)
+
+	return m, nil
+}
+
+// processAsync runs the full AI pipeline in the background.
+func (uc *UseCase) processAsync(m *meeting.Meeting, fileBytes []byte, in UploadInput) {
+	ctx := context.Background()
+	l := uc.log.With().Str("meeting_id", m.ID.String()).Logger()
+
+	defer func() {
+		if r := recover(); r != nil {
+			l.Error().Interface("panic", r).Msg("meeting: panic in async processing")
+			_ = uc.repo.UpdateStatus(ctx, m.ID, meeting.StatusFailed)
+		}
+	}()
+
+	l.Info().Msg("meeting: starting async AI processing")
+
+	txt, err := uc.pdfExtractor.Extract(ctx, bytes.NewReader(fileBytes), in.FileName)
+	if err != nil {
+		l.Error().Err(err).Msg("meeting: pdf extraction failed")
+		_ = uc.repo.UpdateStatus(ctx, m.ID, meeting.StatusFailed)
+		return
+	}
+
+	if txt == "" {
+		l.Warn().Msg("meeting: extracted empty text from PDF")
+		_ = uc.repo.UpdateStatus(ctx, m.ID, meeting.StatusFailed)
+		return
+	}
+
+	aiResult, err := uc.aiUC.GenerateMeetingAnalysis(ctx, txt)
+	if err != nil {
+		l.Error().Err(err).Msg("meeting: AI analysis failed")
+		_ = uc.repo.UpdateStatus(ctx, m.ID, meeting.StatusFailed)
+		return
+	}
+
+	// Update meeting with results
+	completed := time.Now()
+	m.Transcript = &txt
+	m.AISummary = &aiResult.Summary
+	m.Status = meeting.StatusCompleted
+	m.ProcessingCompletedAt = &completed
+
+	if err := uc.repo.Update(ctx, m); err != nil {
+		l.Error().Err(err).Msg("meeting: update record failed")
+		_ = uc.repo.UpdateStatus(ctx, m.ID, meeting.StatusFailed)
+		return
+	}
+
+	// Save tasks
+	for _, t := range aiResult.Tasks {
+		desc := t.Description
+		priority := "medium"
+		if t.Priority != nil {
+			priority = *t.Priority
+		}
+		_ = uc.repo.CreateTask(ctx, &meeting.TaskRelation{
+			ID:           uuid.New(),
+			WorkspaceID:  in.WorkspaceID,
+			ProjectID:    in.ProjectID,
+			MeetingID:    &m.ID,
+			Title:        t.Title,
+			Description:  desc,
+			Status:       "todo",
+			Priority:     priority,
+			AIGenerated:  true,
+			AIConfidence: t.ConfidenceScore,
+		})
+	}
+
+	// Save decisions
+	for _, d := range aiResult.Decisions {
+		_ = uc.repo.CreateDecision(ctx, &meeting.DecisionRelation{
+			ID:           uuid.New(),
+			WorkspaceID:  in.WorkspaceID,
+			ProjectID:    in.ProjectID,
+			MeetingID:    m.ID,
+			DecisionText: d.Decision,
+		})
+	}
+
+	// Save blockers/risks
+	for _, r := range aiResult.Risks {
+		sev := "medium"
+		if r.Severity != nil {
+			sev = *r.Severity
+		}
+		_ = uc.repo.CreateBlocker(ctx, &meeting.BlockerRelation{
+			ID:          uuid.New(),
+			WorkspaceID: in.WorkspaceID,
+			ProjectID:   in.ProjectID,
+			MeetingID:   m.ID,
+			BlockerText: r.Risk,
+			Severity:    sev,
+			Resolved:    false,
+		})
+	}
+
+	// Save document
+	_ = uc.repo.CreateDocument(ctx, &meeting.DocumentRelation{
+		ID:            uuid.New(),
+		WorkspaceID:   in.WorkspaceID,
+		ProjectID:     in.ProjectID,
+		MeetingID:     &m.ID,
+		Title:         fmt.Sprintf("%s - AI Documentation", in.Title),
+		Type:          "sprint_plan",
+		Content:       aiResult.ProjectDocumentationMarkdown,
+		GeneratedByAI: true,
+	})
+
+	l.Info().Msg("meeting: async AI processing complete")
 }
 
 func (uc *UseCase) GetByID(ctx context.Context, id uuid.UUID) (*meeting.Meeting, error) {

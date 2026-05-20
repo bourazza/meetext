@@ -95,7 +95,7 @@ func New(cfg *config.Config, log zerolog.Logger) (*App, error) {
 		OAuthGoogle: handler.NewOAuthHandler(googleProvider, authUC, cfg.App.FrontendURL, log),
 		OAuthGitHub: handler.NewOAuthHandler(githubProvider, authUC, cfg.App.FrontendURL, log),
 		Workspace:   handler.NewWorkspaceHandler(workspaceUC),
-		Meeting:     handler.NewMeetingHandler(meetingUC),
+		Meeting:     handler.NewMeetingHandler(meetingUC, log),
 		AI:          handler.NewAIHandler(aiUC, whisperProvider, log),
 	}
 

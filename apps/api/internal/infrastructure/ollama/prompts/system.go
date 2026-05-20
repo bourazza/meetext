@@ -2,6 +2,21 @@ package prompts
 
 import "fmt"
 
+const chunkSummaryPrompt = `You are a meeting notes summarizer. Read the following section of a meeting transcript and produce a concise summary capturing all key points, decisions, tasks, risks, and action items mentioned.
+
+Respond ONLY with a JSON object in this exact format:
+{"summary": "<your concise summary here>"}
+
+Do not include markdown, code blocks, or any other text. Only the raw JSON.
+
+Meeting section:
+`
+
+// BuildChunkSummaryPrompt builds a prompt to summarize a single text chunk.
+func BuildChunkSummaryPrompt(chunk string) string {
+	return fmt.Sprintf("%s%s", chunkSummaryPrompt, chunk)
+}
+
 const meetingAnalysisSystemPrompt = `
 You are an expert AI meeting assistant and a highly capable systems architect. 
 Your task is to analyze the following meeting transcript/notes and extract specific structural elements.
