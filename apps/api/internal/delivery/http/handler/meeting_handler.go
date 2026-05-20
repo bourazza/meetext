@@ -32,7 +32,8 @@ func (h *MeetingHandler) Upload(w http.ResponseWriter, r *http.Request) {
 	userID, _ := r.Context().Value(constants.CtxUserID).(uuid.UUID)
 
 	if err := r.ParseMultipartForm(constants.MaxUploadBytes); err != nil {
-		response.Error(w, apperr.ErrFileTooLarge)
+		log.Error().Err(err).Msg("ParseMultipartForm failed")
+		response.Error(w, apperr.Wrap(err, http.StatusBadRequest, "BAD_REQUEST", "Failed to parse multipart form"))
 		return
 	}
 

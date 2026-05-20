@@ -132,9 +132,9 @@ func (uc *UseCase) Upload(ctx context.Context, in UploadInput) (*meeting.Meeting
 		for _, t := range aiResult.Tasks {
 			taskID := uuid.New()
 			desc := t.Description
-			priority := t.Priority
-			if priority == "" {
-				priority = "medium"
+			priority := "medium"
+			if t.Priority != nil {
+				priority = *t.Priority
 			}
 			taskRel := &meeting.TaskRelation{
 				ID:           taskID,
@@ -146,7 +146,7 @@ func (uc *UseCase) Upload(ctx context.Context, in UploadInput) (*meeting.Meeting
 				Status:       "todo",
 				Priority:     priority,
 				AIGenerated:  true,
-				AIConfidence: 92.0,
+				AIConfidence: t.ConfidenceScore,
 			}
 			_ = uc.repo.CreateTask(ctx, taskRel)
 		}
@@ -159,7 +159,7 @@ func (uc *UseCase) Upload(ctx context.Context, in UploadInput) (*meeting.Meeting
 				WorkspaceID:  in.WorkspaceID,
 				ProjectID:    in.ProjectID,
 				MeetingID:    id,
-				DecisionText: d.Description,
+				DecisionText: d.Decision,
 			}
 			_ = uc.repo.CreateDecision(ctx, decRel)
 		}
@@ -167,16 +167,16 @@ func (uc *UseCase) Upload(ctx context.Context, in UploadInput) (*meeting.Meeting
 		// Save blockers/risks
 		for _, r := range aiResult.Risks {
 			blockerID := uuid.New()
-			sev := r.Severity
-			if sev == "" {
-				sev = "medium"
+			sev := "medium"
+			if r.Severity != nil {
+				sev = *r.Severity
 			}
 			blockRel := &meeting.BlockerRelation{
 				ID:          blockerID,
 				WorkspaceID: in.WorkspaceID,
 				ProjectID:   in.ProjectID,
 				MeetingID:   id,
-				BlockerText: r.Description,
+				BlockerText: r.Risk,
 				Severity:    sev,
 				Resolved:    false,
 			}
@@ -193,7 +193,7 @@ func (uc *UseCase) Upload(ctx context.Context, in UploadInput) (*meeting.Meeting
 			MeetingID:     &id,
 			Title:         docTitle,
 			Type:          "sprint_plan",
-			Content:       aiResult.ProjectDocumentation,
+			Content:       aiResult.ProjectDocumentationMarkdown,
 			GeneratedByAI: true,
 		}
 		_ = uc.repo.CreateDocument(ctx, docRel)

@@ -21,8 +21,7 @@ export async function uploadMeeting(input: UploadMeetingInput): Promise<{ meetin
     `/workspaces/${input.workspaceId}/meetings`,
     form,
     {
-      headers: { 'Content-Type': 'multipart/form-data' },
-      timeout: 120000,
+      timeout: 1800000, // 30 minutes
       onUploadProgress: (event) => {
         if (!input.onProgress || !event.total) return
         input.onProgress(Math.round((event.loaded / event.total) * 100))

@@ -19,38 +19,49 @@ type ProcessState = 'idle' | 'uploading' | 'transcribing' | 'analyzing' | 'extra
 interface Task {
   title: string
   description: string
-  assignee: string
-  priority: 'low' | 'medium' | 'high'
-  due_date: string
+  assignee: string | null
+  priority: 'low' | 'medium' | 'high' | null
+  due_date: string | null
+  status: 'todo' | 'in_progress' | 'done' | null
+  confidence_score: number
 }
 
 interface Ticket {
   title: string
+  type: 'bug' | 'feature' | 'enhancement' | 'task'
   description: string
-  type: 'bug' | 'feature' | 'enhancement'
   status: 'todo' | 'in_progress' | 'done'
+  confidence_score: number
 }
 
 interface Decision {
-  description: string
-  made_by: string
+  decision: string
+  made_by: string | null
+  confidence_score: number
 }
 
 interface Risk {
+  risk: string
+  severity: 'low' | 'medium' | 'high' | null
+  mitigation: string | null
+  confidence_score: number
+}
+
+interface Blocker {
   description: string
-  severity: 'low' | 'medium' | 'high'
-  mitigation: string
+  confidence_score: number
+}
+
+interface ActionItem {
+  description: string
+  owner: string | null
+  deadline: string | null
+  confidence_score: number
 }
 
 interface TechNote {
   topic: string
   details: string
-}
-
-interface ClientRequest {
-  request: string
-  priority: 'low' | 'medium' | 'high'
-  is_committed: boolean
 }
 
 interface GeneratedResults {
@@ -59,54 +70,53 @@ interface GeneratedResults {
   tickets: Ticket[]
   decisions: Decision[]
   risks: Risk[]
+  blockers: Blocker[]
   technical_notes: TechNote[]
-  client_requests: ClientRequest[]
-  project_documentation: string
+  action_items: ActionItem[]
+  project_documentation_markdown: string
 }
 
 const mockResults: GeneratedResults = {
-  summary: "The meeting focused on the new mobile app authentication API. Sarah committed to leading the authentication endpoint implementation with a targeted delivery of this coming Friday. The team formally agreed to select PostgreSQL as the primary database instead of MongoDB for the new microservice. Critical blockers were identified regarding the outdated third-party payment gateway integration, which will be addressed by contacting their support team immediately. Additionally, Acme Corp explicitly requested the addition of a PDF export feature which the product team committed to supporting.",
+  summary: "The meeting focused on the new mobile app authentication API. Sarah committed to leading the authentication endpoint implementation with a targeted delivery of this coming Friday.",
   tasks: [
     {
       title: "Build Authentication Endpoint",
       description: "Design and implement secure JWT authentication API endpoints for the new mobile client.",
       assignee: "Sarah",
       priority: "high",
-      due_date: "Friday"
-    },
-    {
-      title: "Design Team Assets Follow-up",
-      description: "Follow up with the brand agency regarding the final responsive SVG logo assets.",
-      assignee: "David",
-      priority: "medium",
-      due_date: "Tomorrow"
+      due_date: "2026-05-24",
+      status: "todo",
+      confidence_score: 0.95
     }
   ],
   tickets: [
     {
-      title: "FEAT-104: Add PDF Export Feature",
-      description: "Develop reusable frontend and backend service modules supporting standard project document PDF downloads requested by Acme Corp.",
+      title: "Add PDF Export Feature",
+      description: "Implement automated PDF and CSV export for monthly billing statement sheets.",
       type: "feature",
-      status: "todo"
-    },
-    {
-      title: "BUG-219: Fix Payment Gateway Callback",
-      description: "Investigate timeout errors and signature verification mismatch occurring under webhook integration environment.",
-      type: "bug",
-      status: "todo"
+      status: "todo",
+      confidence_score: 0.88
     }
   ],
   decisions: [
     {
-      description: "Adopt PostgreSQL as primary data storage instead of MongoDB for database architecture alignment.",
-      made_by: "Team"
+      decision: "Adopt PostgreSQL as primary data storage instead of MongoDB.",
+      made_by: "Team",
+      confidence_score: 1.0
     }
   ],
   risks: [
     {
-      description: "Third-party payment gateway documentation is outdated and lacks modern SDK reference pages.",
+      risk: "Third-party payment gateway documentation is outdated.",
       severity: "high",
-      mitigation: "Submit priority support request ticket and schedule direct integration engineering call."
+      mitigation: "Submit priority support request ticket.",
+      confidence_score: 0.82
+    }
+  ],
+  blockers: [
+    {
+      description: "Waiting on Acme Corp for production API keys before migration can begin.",
+      confidence_score: 0.90
     }
   ],
   technical_notes: [
@@ -115,25 +125,15 @@ const mockResults: GeneratedResults = {
       details: "PostgreSQL chosen to leverage rich native JSONB queries, relational safety, and strict multi-workspace schemas."
     }
   ],
-  client_requests: [
+  action_items: [
     {
-      request: "Acme Corp requested automated export to PDF and CSV formats for all monthly billing statement sheets.",
-      priority: "high",
-      is_committed: true
+      description: "Send meeting summary to the client via email.",
+      owner: "John",
+      deadline: "2026-05-21",
+      confidence_score: 0.99
     }
   ],
-  project_documentation: `## Meeting Minutes: Mobile App Sync
-
-### 1. Executive Summary
-The engineering team convened to align on key technical architecture choices for the upcoming mobile client releases. Priority efforts were assigned for the security infrastructure, and database layers were consolidated.
-
-### 2. Strategic Technical Decisions
-* **Database standard**: Formally standardized on **PostgreSQL** over MongoDB for our microservices due to transactional consistency requirements.
-* **Security standards**: Enforced JWT authorization workflows across authentication endpoints.
-
-### 3. Immediate Priorities
-* **Auth Layer**: Sarah is leading the implementation of auth endpoints.
-* **Integrations Blockers**: The team is taking proactive measures to resolve third-party API mismatches.`
+  project_documentation_markdown: `## Meeting Minutes: Mobile App Sync\n\n### 1. Executive Summary\nThe engineering team convened to align on key technical architecture choices for the upcoming mobile client releases.\n\n### 2. Strategic Technical Decisions\n* **Database standard**: Formally standardized on **PostgreSQL**.`
 }
 
 export default function DashboardPage() {
@@ -162,7 +162,8 @@ export default function DashboardPage() {
     decisions: false,
     risks: false,
     technical_notes: false,
-    client_requests: false,
+    blockers: false,
+    action_items: false,
     documentation: false
   })
 
@@ -186,8 +187,8 @@ export default function DashboardPage() {
       return
     }
 
-    if (file.size > 250 * 1024 * 1024) {
-      toast.error('File size exceeds the 250MB limit.')
+    if (file.size > 2 * 1024 * 1024 * 1024) {
+      toast.error('File size exceeds the 2GB limit.')
       return
     }
 
@@ -347,7 +348,7 @@ export default function DashboardPage() {
   }
 
   const exportAsMarkdown = () => {
-    let markdown = `# ${results.project_documentation}\n\n`
+    let markdown = `# ${results.project_documentation_markdown}\n\n`
     markdown += `## Meeting Summary\n${results.summary}\n\n`
     
     markdown += `## Action Items\n`
@@ -843,7 +844,10 @@ export default function DashboardPage() {
 
                 {!collapsedCards.tasks && (
                   <div className="p-5 space-y-4">
-                    {results.tasks.map((task, i) => (
+                    {(!results.tasks || results.tasks.length === 0) ? (
+                      <p className="text-xs text-zinc-500 italic">No tasks recorded.</p>
+                    ) : (
+                      results.tasks.map((task, i) => (
                       <div key={i} className="group relative border border-zinc-100 rounded-lg p-3 hover:bg-zinc-50/50 transition">
                         <div className="flex items-start justify-between gap-4">
                           <div>
@@ -880,7 +884,7 @@ export default function DashboardPage() {
                           </div>
                         </div>
                       </div>
-                    ))}
+                    )))}
                   </div>
                 )}
               </div>
@@ -902,7 +906,10 @@ export default function DashboardPage() {
 
                 {!collapsedCards.tickets && (
                   <div className="p-5 space-y-4">
-                    {results.tickets.map((ticket, i) => (
+                    {(!results.tickets || results.tickets.length === 0) ? (
+                      <p className="text-xs text-zinc-500 italic">No tickets recorded.</p>
+                    ) : (
+                      results.tickets.map((ticket, i) => (
                       <div key={i} className="group relative border border-zinc-100 rounded-lg p-3 hover:bg-zinc-50/50 transition">
                         <div className="flex items-start justify-between gap-4">
                           <div>
@@ -934,7 +941,7 @@ export default function DashboardPage() {
                           </div>
                         </div>
                       </div>
-                    ))}
+                    )))}
                   </div>
                 )}
               </div>
@@ -956,7 +963,10 @@ export default function DashboardPage() {
 
                 {!collapsedCards.decisions && (
                   <div className="p-5 space-y-3">
-                    {results.decisions.map((decision, i) => (
+                    {(!results.decisions || results.decisions.length === 0) ? (
+                      <p className="text-xs text-zinc-500 italic">No decisions recorded.</p>
+                    ) : (
+                      results.decisions.map((decision, i) => (
                       <div key={i} className="group relative flex items-start gap-3 border border-zinc-100 rounded-lg p-3 hover:bg-zinc-50/50">
                         <div className="mt-0.5 rounded-full bg-emerald-50 p-1 text-emerald-600 border border-emerald-100">
                           <Check className="h-3.5 w-3.5" />
@@ -976,7 +986,7 @@ export default function DashboardPage() {
                           </button>
                         </div>
                       </div>
-                    ))}
+                    )))}
                   </div>
                 )}
               </div>
@@ -998,7 +1008,10 @@ export default function DashboardPage() {
 
                 {!collapsedCards.risks && (
                   <div className="p-5 space-y-4">
-                    {results.risks.map((risk, i) => (
+                    {(!results.risks || results.risks.length === 0) ? (
+                      <p className="text-xs text-zinc-500 italic">No risks recorded.</p>
+                    ) : (
+                      results.risks.map((risk, i) => (
                       <div key={i} className="group relative border border-zinc-100 rounded-lg p-3 hover:bg-zinc-50/50 transition">
                         <div className="flex items-start justify-between gap-4">
                           <div>
@@ -1023,7 +1036,88 @@ export default function DashboardPage() {
                           </div>
                         </div>
                       </div>
-                    ))}
+                    )))}
+                  </div>
+                )}
+              </div>
+
+              
+              {/* Card: Blockers */}
+              <div className="rounded-xl border border-zinc-200/80 bg-white shadow-sm overflow-hidden">
+                <div className="flex items-center justify-between border-b border-zinc-100 bg-zinc-50/50 px-5 py-4">
+                  <div className="flex items-center gap-2.5">
+                    <AlertCircle className="h-4 w-4 text-rose-600" />
+                    <h3 className="font-bold text-zinc-900 text-sm">Active Blockers</h3>
+                  </div>
+                  <button 
+                    onClick={() => toggleCollapse('blockers')}
+                    className="p-1 rounded text-zinc-400 hover:text-zinc-950 hover:bg-zinc-100 transition"
+                  >
+                    {collapsedCards.blockers ? <ChevronDown className="h-4 w-4" /> : <ChevronUp className="h-4 w-4" />}
+                  </button>
+                </div>
+
+                {!collapsedCards.blockers && (
+                  <div className="p-5 space-y-4">
+                    {(!results.blockers || results.blockers.length === 0) ? (
+                      <p className="text-xs text-zinc-500 italic">No active blockers recorded.</p>
+                    ) : (
+                      results.blockers.map((blocker, i) => (
+                        <div key={i} className="group relative border border-zinc-100 rounded-lg p-3 hover:bg-zinc-50/50 transition">
+                          <div className="flex items-start justify-between gap-4">
+                            <div>
+                              <p className="text-xs font-bold text-zinc-900">{blocker.description}</p>
+                              <span className={`inline-block mt-2.5 rounded px-1.5 py-0.5 text-[9px] font-bold uppercase border ${blocker.confidence_score > 0.8 ? 'bg-emerald-50 border-emerald-100 text-emerald-600' : 'bg-amber-50 border-amber-100 text-amber-600'}`}>
+                                Conf: {(blocker.confidence_score * 100).toFixed(0)}%
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                )}
+              </div>
+
+
+              {/* Card: Action Items */}
+              <div className="rounded-xl border border-zinc-200/80 bg-white shadow-sm overflow-hidden">
+                <div className="flex items-center justify-between border-b border-zinc-100 bg-zinc-50/50 px-5 py-4">
+                  <div className="flex items-center gap-2.5">
+                    <CheckCircle2 className="h-4 w-4 text-indigo-500" />
+                    <h3 className="font-bold text-zinc-900 text-sm">Action Items</h3>
+                  </div>
+                  <button 
+                    onClick={() => toggleCollapse('action_items')}
+                    className="p-1 rounded text-zinc-400 hover:text-zinc-950 hover:bg-zinc-100 transition"
+                  >
+                    {collapsedCards.action_items ? <ChevronDown className="h-4 w-4" /> : <ChevronUp className="h-4 w-4" />}
+                  </button>
+                </div>
+
+                {!collapsedCards.action_items && (
+                  <div className="p-5 space-y-4">
+                    {(!results.action_items || results.action_items.length === 0) ? (
+                      <p className="text-xs text-zinc-500 italic">No action items recorded.</p>
+                    ) : (
+                      results.action_items.map((item, i) => (
+                        <div key={i} className="group relative border border-zinc-100 rounded-lg p-3 hover:bg-zinc-50/50 transition">
+                          <div className="flex items-start justify-between gap-4">
+                            <div>
+                              <p className="text-xs font-bold text-zinc-900">{item.description}</p>
+                              <div className="flex gap-2 mt-2">
+                                <span className="rounded bg-zinc-100 px-1.5 py-0.5 text-[9px] font-bold text-zinc-600 uppercase border border-zinc-200">
+                                  Owner: {item.owner || "Unassigned"}
+                                </span>
+                                <span className={`rounded px-1.5 py-0.5 text-[9px] font-bold uppercase border ${item.confidence_score > 0.8 ? 'bg-emerald-50 border-emerald-100 text-emerald-600' : 'bg-amber-50 border-amber-100 text-amber-600'}`}>
+                                  Conf: {(item.confidence_score * 100).toFixed(0)}%
+                                </span>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      ))
+                    )}
                   </div>
                 )}
               </div>
@@ -1065,17 +1159,17 @@ export default function DashboardPage() {
                     ) : (
                       <div className="group relative">
                         <pre className="rounded-lg bg-zinc-50 border border-zinc-200/50 p-5 font-mono text-xs text-zinc-700 leading-relaxed overflow-x-auto whitespace-pre-wrap">
-                          {results.project_documentation}
+                          {results.project_documentation_markdown}
                         </pre>
                         <div className="absolute right-4 top-4 flex items-center gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
                           <button 
-                            onClick={() => startEditing('project_documentation', results.project_documentation)}
+                            onClick={() => startEditing('project_documentation', results.project_documentation_markdown)}
                             className="p-1.5 rounded bg-white shadow-sm border border-zinc-200 text-zinc-400 hover:text-zinc-950"
                           >
                             <Edit2 className="h-3.5 w-3.5" />
                           </button>
                           <button 
-                            onClick={() => copyToClipboard(results.project_documentation, 'Documentation')}
+                            onClick={() => copyToClipboard(results.project_documentation_markdown, 'Documentation')}
                             className="p-1.5 rounded bg-white shadow-sm border border-zinc-200 text-zinc-400 hover:text-zinc-950"
                           >
                             <Copy className="h-3.5 w-3.5" />

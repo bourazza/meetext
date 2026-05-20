@@ -1,41 +1,46 @@
 package ai
 
 type Task struct {
-	Title       string `json:"title"`
-	Description string `json:"description"`
-	Assignee    string `json:"assignee"`
-	Priority    string `json:"priority"` // low | medium | high
-	DueDate     string `json:"due_date"`
+	Title           string  `json:"title"`
+	Description     string  `json:"description"`
+	Priority        *string `json:"priority"` // low | medium | high | null
+	Assignee        *string `json:"assignee"` // string | null
+	DueDate         *string `json:"due_date"` // YYYY-MM-DD | null
+	Status          *string `json:"status"`   // todo | in_progress | done | null
+	ConfidenceScore float64 `json:"confidence_score"`
 }
 
 type Ticket struct {
-	Title       string `json:"title"`
-	Description string `json:"description"`
-	Type        string `json:"type"` // bug | feature | enhancement
-	Status      string `json:"status"` // todo | in_progress | done
+	Title           string  `json:"title"`
+	Type            string  `json:"type"`   // bug | feature | enhancement | task
+	Description     string  `json:"description"`
+	Status          string  `json:"status"` // todo | in_progress | done
+	ConfidenceScore float64 `json:"confidence_score"`
 }
 
 type Decision struct {
-	Description string `json:"description"`
-	MadeBy      string `json:"made_by"`
+	Decision        string  `json:"decision"`
+	MadeBy          *string `json:"made_by"` // string | null
+	ConfidenceScore float64 `json:"confidence_score"`
 }
 
 type Risk struct {
-	Description string `json:"description"`
-	Severity    string `json:"severity"` // low | medium | high
-	Mitigation  string `json:"mitigation"`
+	Risk            string  `json:"risk"`
+	Severity        *string `json:"severity"`   // low | medium | high | null
+	Mitigation      *string `json:"mitigation"` // string | null
+	ConfidenceScore float64 `json:"confidence_score"`
+}
+
+type Blocker struct {
+	Description     string  `json:"description"`
+	ConfidenceScore float64 `json:"confidence_score"`
 }
 
 type ActionItem struct {
-	Description string `json:"description"`
-	Owner       string `json:"owner"`
-	Deadline    string `json:"deadline"`
-}
-
-type ClientRequest struct {
-	Request     string `json:"request"`
-	Priority    string `json:"priority"`
-	IsCommitted bool   `json:"is_committed"`
+	Description     string  `json:"description"`
+	Owner           *string `json:"owner"`
+	Deadline        *string `json:"deadline"`
+	ConfidenceScore float64 `json:"confidence_score"`
 }
 
 type TechnicalNote struct {
@@ -44,13 +49,13 @@ type TechnicalNote struct {
 }
 
 type AIResult struct {
-	Summary              string          `json:"summary"`
-	Tasks                []Task          `json:"tasks"`
-	Tickets              []Ticket        `json:"tickets"`
-	Decisions            []Decision      `json:"decisions"`
-	Risks                []Risk          `json:"risks"`
-	ActionItems          []ActionItem    `json:"action_items"`
-	TechnicalNotes       []TechnicalNote `json:"technical_notes"`
-	ClientRequests       []ClientRequest `json:"client_requests"`
-	ProjectDocumentation string          `json:"project_documentation"`
+	Summary                      string          `json:"summary"`
+	Tasks                        []Task          `json:"tasks"`
+	Tickets                      []Ticket        `json:"tickets"`
+	Decisions                    []Decision      `json:"decisions"`
+	Risks                        []Risk          `json:"risks"`
+	Blockers                     []Blocker       `json:"blockers"`
+	TechnicalNotes               []TechnicalNote `json:"technical_notes"`
+	ActionItems                  []ActionItem    `json:"action_items"`
+	ProjectDocumentationMarkdown string          `json:"project_documentation_markdown"`
 }

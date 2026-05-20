@@ -1,8 +1,10 @@
 import axios, { AxiosError } from 'axios'
 import type { TokenPair } from '@/types'
 
+const baseURL = process.env.NEXT_PUBLIC_API_URL ? `${process.env.NEXT_PUBLIC_API_URL}/api/v1` : '/api/v1'
+
 const api = axios.create({
-  baseURL: '/api/v1',
+  baseURL,
   headers: { 'Content-Type': 'application/json' },
   withCredentials: true,
   timeout: 15000,

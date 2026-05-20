@@ -20,7 +20,7 @@ const (
 	MeetingStatusFailed     = "failed"
 
 	// File upload limits
-	MaxUploadBytes = 500 << 20 // 500 MB
+	MaxUploadBytes = 2 << 30 // 2 GB
 
 	// Supported MIME types for meeting uploads
 	MIMEAudioMPEG = "audio/mpeg"
