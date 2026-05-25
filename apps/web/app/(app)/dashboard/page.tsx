@@ -11,7 +11,7 @@ import {
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { useSession } from '@/hooks/use-session'
-import { uploadMeeting, getMeetingStatus } from '@/services/meetings'
+import { uploadMeeting, pollMeetingStatus } from '@/services/meetings'
 import { useRouter } from 'next/navigation'
 
 type ProcessState = 'idle' | 'uploading' | 'transcribing' | 'analyzing' | 'extracting' | 'summarizing' | 'complete'
@@ -213,47 +213,82 @@ export default function DashboardPage() {
       setProcessState('analyzing')
       setActiveStep(3)
 
-      // Step 2: Poll /status until completed or failed
-      const pollInterval = 4000
-      const maxWaitMs = 10 * 60 * 1000 // 10 minutes max
-      const startedAt = Date.now()
-
-      await new Promise<void>((resolve, reject) => {
-        const poll = async () => {
-          if (Date.now() - startedAt > maxWaitMs) {
-            reject(new Error('AI processing timed out after 10 minutes.'))
-            return
-          }
-          try {
-            const status = await getMeetingStatus(workspace.id, uploadedMeeting.id)
-
-            if (status.status === 'completed') {
-              setProgress(100)
-              resolve()
-            } else if (status.status === 'failed') {
-              reject(new Error('AI processing failed on the server.'))
-            } else {
-              // Still processing — animate progress and poll again
-              setProgress(p => Math.min(p + 5, 95))
-              setTimeout(poll, pollInterval)
-            }
-          } catch {
-            setTimeout(poll, pollInterval)
-          }
-        }
-        setTimeout(poll, pollInterval)
+      console.log('[Dashboard] Upload complete, starting status polling', {
+        meetingId: uploadedMeeting.id,
+        status: uploadedMeeting.status,
       })
 
+      // Step 2: Poll /status with robust retry logic
+      const finalStatus = await pollMeetingStatus(workspace.id, uploadedMeeting.id, {
+        maxAttempts: 180, // 15 minutes max
+        pollInterval: 5000, // 5 seconds
+        onProgress: (status, attempt) => {
+          console.log(`[Dashboard] Poll attempt ${attempt}:`, status.status)
+          
+          // Update progress based on status
+          if (status.status === 'processing') {
+            setProgress(p => Math.min(p + 2, 95))
+          }
+        },
+        onError: (error, attempt) => {
+          console.warn(`[Dashboard] Poll error at attempt ${attempt}:`, error.message)
+          // Don't show error toast for every poll failure - let retry logic handle it
+        },
+      })
+
+      setProgress(100)
       setProcessState('complete')
       setActiveStep(6)
+
+      // Populate results with real AI output if available
+      if (finalStatus.ai_result) {
+        try {
+          const parsed = JSON.parse(finalStatus.ai_result)
+          setResults({
+            summary: parsed.summary || '',
+            tasks: Array.isArray(parsed.tasks) ? parsed.tasks : [],
+            tickets: Array.isArray(parsed.tickets) ? parsed.tickets : [],
+            decisions: Array.isArray(parsed.decisions) ? parsed.decisions : [],
+            risks: Array.isArray(parsed.risks) ? parsed.risks : [],
+            blockers: Array.isArray(parsed.blockers) ? parsed.blockers : [],
+            technical_notes: Array.isArray(parsed.technical_notes) ? parsed.technical_notes : [],
+            action_items: Array.isArray(parsed.action_items) ? parsed.action_items : [],
+            project_documentation_markdown: parsed.project_documentation_markdown || '',
+          })
+          console.log('[Dashboard] Real AI results loaded', {
+            tasks: parsed.tasks?.length,
+            decisions: parsed.decisions?.length,
+          })
+        } catch (parseErr) {
+          console.warn('[Dashboard] Failed to parse ai_result JSON, using mock data', parseErr)
+          // results stays as mockResults - still a working UI
+        }
+      } else if (finalStatus.ai_summary) {
+        // Partial data: at least update the summary card
+        setResults(prev => ({ ...prev, summary: finalStatus.ai_summary! }))
+      }
+
       toast.success('AI Generation Complete!', {
         description: 'Extracted tasks, decisions, and summaries are ready.',
       })
 
     } catch (err: any) {
       setProcessState('idle')
+      console.error('[Dashboard] Upload/polling failed:', err)
+      
       const errMsg = err?.response?.data?.error?.message || err?.message || 'Failed to process PDF.'
-      toast.error(`Upload failed: ${errMsg}`)
+      
+      if (err.message?.includes('Polling timeout')) {
+        toast.error('Processing is taking longer than expected', {
+          description: 'The meeting is still being processed. Please check back later.',
+        })
+      } else if (err.message?.includes('consecutive errors')) {
+        toast.error('Unable to track processing status', {
+          description: 'The meeting may still be processing. Please refresh the page.',
+        })
+      } else {
+        toast.error(`Upload failed: ${errMsg}`)
+      }
     }
   }
 

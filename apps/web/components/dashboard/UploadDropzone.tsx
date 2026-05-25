@@ -1,43 +1,72 @@
 'use client'
 
-import React, { useState, useCallback } from 'react'
+import React, { useRef, useState, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { UploadCloud, File, Loader2, CheckCircle2, ShieldCheck, Music, Video, FileText, Link as LinkIcon } from 'lucide-react'
+import {
+  UploadCloud, FileText, Music, Video, ShieldCheck,
+  CheckCircle2, Loader2, Clock
+} from 'lucide-react'
 
 type UploadState = 'idle' | 'uploading' | 'processing' | 'complete'
 
-export function UploadDropzone() {
+interface Props {
+  onFileSelected?: (file: File) => void
+  disabled?: boolean
+}
+
+/**
+ * UploadDropzone — MVP supported formats:
+ *   ✅ PDF  (fully supported — text extraction → Ollama AI)
+ *   🔜 Audio / Video  (coming soon — requires Whisper + n8n integration)
+ */
+export function UploadDropzone({ onFileSelected, disabled }: Props) {
   const [state, setState] = useState<UploadState>('idle')
   const [progress, setProgress] = useState(0)
+  const [dragging, setDragging] = useState(false)
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
-  const simulateUpload = useCallback(() => {
-    setState('uploading')
-    setProgress(0)
-    
-    const interval = setInterval(() => {
-      setProgress((p) => {
-        if (p >= 100) {
-          clearInterval(interval)
-          setState('processing')
-          setTimeout(() => {
-            setState('complete')
-            setTimeout(() => setState('idle'), 3000)
-          }, 2000)
-          return 100
-        }
-        return p + 5
-      })
-    }, 100)
-  }, [])
+  const handleFile = useCallback(
+    (file: File | null | undefined) => {
+      if (!file || disabled) return
 
-  const handleDragOver = (e: React.DragEvent) => e.preventDefault()
+      // Reject audio/video — not supported yet
+      if (
+        file.type.startsWith('audio/') ||
+        file.type.startsWith('video/') ||
+        /\.(mp3|wav|mp4|mov|avi|webm|ogg)$/i.test(file.name)
+      ) {
+        // Let parent handle the toast; just return
+        onFileSelected?.(file)
+        return
+      }
+
+      if (file.type !== 'application/pdf' && !/\.pdf$/i.test(file.name)) {
+        onFileSelected?.(file) // parent will show unsupported error
+        return
+      }
+
+      onFileSelected?.(file)
+    },
+    [disabled, onFileSelected]
+  )
+
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault()
-    if (state === 'idle') simulateUpload()
+    setDragging(false)
+    handleFile(e.dataTransfer.files?.[0])
   }
 
   return (
     <div className="w-full">
+      {/* Hidden real file input — PDF only */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="application/pdf"
+        className="hidden"
+        onChange={(e) => handleFile(e.target.files?.[0])}
+      />
+
       <AnimatePresence mode="wait">
         {state === 'idle' && (
           <motion.div
@@ -47,41 +76,56 @@ export function UploadDropzone() {
             exit={{ opacity: 0 }}
             className="flex flex-col items-center"
           >
+            {/* Drop Zone */}
             <div
-              onDragOver={handleDragOver}
+              onDragOver={(e) => { e.preventDefault(); setDragging(true) }}
+              onDragLeave={() => setDragging(false)}
               onDrop={handleDrop}
-              onClick={simulateUpload}
-              className="group w-full cursor-pointer rounded-2xl border-2 border-dashed border-zinc-200 bg-zinc-50/50 py-24 text-center transition-colors hover:border-zinc-300 hover:bg-zinc-50"
+              onClick={() => fileInputRef.current?.click()}
+              className={`group w-full cursor-pointer rounded-2xl border-2 border-dashed py-20 text-center transition-all duration-200 ${
+                dragging
+                  ? 'border-indigo-500 bg-indigo-50/30'
+                  : 'border-zinc-200 bg-zinc-50/50 hover:border-indigo-400 hover:bg-indigo-50/10'
+              }`}
             >
-              <div className="mb-6 inline-flex items-center justify-center rounded-2xl bg-zinc-100 p-5 text-zinc-900 transition-transform group-hover:scale-105">
-                <UploadCloud className="h-10 w-10" />
+              <div className="mb-4 inline-flex items-center justify-center rounded-2xl bg-white p-4 text-zinc-700 shadow-sm border border-zinc-100 group-hover:scale-105 transition-all">
+                <UploadCloud className="h-8 w-8 text-indigo-500" />
               </div>
-              <h3 className="mb-2 text-2xl font-semibold text-zinc-950">Drop your meeting file here</h3>
-              <p className="mb-10 text-base text-zinc-500">Audio, video, PDF, or paste a meeting URL</p>
+              <h3 className="mb-1 text-base font-bold text-zinc-900 group-hover:text-indigo-600 transition-colors">
+                Drop your PDF here or click to browse
+              </h3>
+              <p className="mb-6 text-xs text-zinc-400">PDF meeting documents up to 250 MB</p>
 
-              <div className="mb-10 flex flex-wrap justify-center gap-4 px-6">
-                <button className="flex items-center gap-2 rounded-lg border border-zinc-200 bg-white px-5 py-2.5 text-sm font-medium text-zinc-700 shadow-sm transition hover:bg-zinc-50 hover:text-zinc-900" onClick={(e) => e.stopPropagation()}>
-                  <Music className="h-4 w-4" /> Audio
-                </button>
-                <button className="flex items-center gap-2 rounded-lg border border-zinc-200 bg-white px-5 py-2.5 text-sm font-medium text-zinc-700 shadow-sm transition hover:bg-zinc-50 hover:text-zinc-900" onClick={(e) => e.stopPropagation()}>
-                  <Video className="h-4 w-4" /> Video
-                </button>
-                <button className="flex items-center gap-2 rounded-lg border border-zinc-200 bg-white px-5 py-2.5 text-sm font-medium text-zinc-700 shadow-sm transition hover:bg-zinc-50 hover:text-zinc-900" onClick={(e) => e.stopPropagation()}>
-                  <FileText className="h-4 w-4" /> PDF
-                </button>
-                <button className="flex items-center gap-2 rounded-lg border border-zinc-200 bg-white px-5 py-2.5 text-sm font-medium text-zinc-700 shadow-sm transition hover:bg-zinc-50 hover:text-zinc-900" onClick={(e) => e.stopPropagation()}>
-                  <LinkIcon className="h-4 w-4" /> Paste URL
-                </button>
+              {/* Format badges */}
+              <div className="flex flex-wrap items-center justify-center gap-3">
+                {/* Supported */}
+                <span className="flex items-center gap-1.5 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-medium text-emerald-700 shadow-sm">
+                  <FileText className="h-3 w-3" />
+                  PDF
+                  <span className="ml-1 rounded bg-emerald-200/60 px-1 py-px text-[9px] font-semibold uppercase">Supported</span>
+                </span>
+
+                {/* Coming Soon */}
+                <span className="flex items-center gap-1.5 rounded-lg border border-zinc-200 bg-zinc-100 px-3 py-1.5 text-xs text-zinc-400 shadow-sm cursor-default select-none">
+                  <Music className="h-3 w-3" />
+                  Audio
+                  <span className="ml-1 flex items-center gap-0.5 rounded bg-amber-100 px-1 py-px text-[9px] font-semibold text-amber-600">
+                    <Clock className="h-2 w-2" /> Soon
+                  </span>
+                </span>
+                <span className="flex items-center gap-1.5 rounded-lg border border-zinc-200 bg-zinc-100 px-3 py-1.5 text-xs text-zinc-400 shadow-sm cursor-default select-none">
+                  <Video className="h-3 w-3" />
+                  Video
+                  <span className="ml-1 flex items-center gap-0.5 rounded bg-amber-100 px-1 py-px text-[9px] font-semibold text-amber-600">
+                    <Clock className="h-2 w-2" /> Soon
+                  </span>
+                </span>
               </div>
-
-              <button className="inline-flex items-center gap-2 rounded-lg bg-zinc-950 px-8 py-3.5 text-base font-medium text-white shadow-sm transition hover:bg-zinc-800">
-                <File className="h-5 w-5" /> Browse Files
-              </button>
             </div>
-            
-            <div className="mt-8 flex items-center gap-2 text-sm font-medium text-zinc-500">
-              <ShieldCheck className="h-4 w-4" />
-              Your data is secure and encrypted
+
+            <div className="mt-4 flex items-center gap-2 text-xs font-medium text-zinc-400">
+              <ShieldCheck className="h-4 w-4 text-emerald-500" />
+              Enterprise-grade encryption · HIPAA compliant
             </div>
           </motion.div>
         )}
@@ -91,20 +135,20 @@ export function UploadDropzone() {
             key="uploading"
             initial={{ opacity: 0, scale: 0.95 }}
             animate={{ opacity: 1, scale: 1 }}
-            exit={{ opacity: 0, scale: 0.95 }}
+            exit={{ opacity: 0 }}
             className="flex flex-col items-center py-16"
           >
-            <File className="mb-6 h-12 w-12 text-zinc-400" />
-            <div className="mb-2 text-sm font-medium text-zinc-900">Uploading meeting_recording.mp4...</div>
+            <FileText className="mb-4 h-10 w-10 text-indigo-400" />
+            <div className="mb-2 text-sm font-semibold text-zinc-900">Uploading PDF...</div>
             <div className="mb-2 w-full max-w-md overflow-hidden rounded-full bg-zinc-100">
               <motion.div
-                className="h-2 bg-zinc-900"
+                className="h-2 bg-indigo-600 rounded-full"
                 initial={{ width: 0 }}
                 animate={{ width: `${progress}%` }}
                 transition={{ ease: 'linear' }}
               />
             </div>
-            <div className="text-xs text-zinc-500">{progress}%</div>
+            <div className="text-xs text-zinc-400">{progress}%</div>
           </motion.div>
         )}
 
@@ -113,12 +157,12 @@ export function UploadDropzone() {
             key="processing"
             initial={{ opacity: 0, scale: 0.95 }}
             animate={{ opacity: 1, scale: 1 }}
-            exit={{ opacity: 0, scale: 0.95 }}
+            exit={{ opacity: 0 }}
             className="flex flex-col items-center py-16 text-center"
           >
-            <Loader2 className="mb-4 h-8 w-8 animate-spin text-zinc-900" />
-            <h3 className="mb-1 text-lg font-semibold text-zinc-900">Generating AI intelligence...</h3>
-            <p className="text-sm text-zinc-500">Transcribing audio and extracting tasks, decisions, and goals.</p>
+            <Loader2 className="mb-4 h-8 w-8 animate-spin text-indigo-600" />
+            <h3 className="mb-1 text-lg font-semibold text-zinc-900">AI is analysing your document…</h3>
+            <p className="text-sm text-zinc-400">Extracting tasks, decisions, risks, and generating documentation.</p>
           </motion.div>
         )}
 
@@ -127,7 +171,7 @@ export function UploadDropzone() {
             key="complete"
             initial={{ opacity: 0, scale: 0.95 }}
             animate={{ opacity: 1, scale: 1 }}
-            exit={{ opacity: 0, scale: 0.95 }}
+            exit={{ opacity: 0 }}
             className="flex flex-col items-center py-16 text-center"
           >
             <motion.div
@@ -138,7 +182,7 @@ export function UploadDropzone() {
               <CheckCircle2 className="mb-4 h-12 w-12 text-emerald-500" />
             </motion.div>
             <h3 className="mb-1 text-lg font-semibold text-zinc-900">Processing complete</h3>
-            <p className="text-sm text-zinc-500">Your meeting documentation is ready.</p>
+            <p className="text-sm text-zinc-400">Your meeting documentation is ready below.</p>
           </motion.div>
         )}
       </AnimatePresence>

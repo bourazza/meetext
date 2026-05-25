@@ -222,7 +222,7 @@ ollama-start: ## Start Ollama and pull model (local dev)
 	@./scripts/start-local.sh
 
 ollama-pull: ## Pull the AI model
-	@ollama pull llama3.2:1b
+	@ollama pull llama3.1:8b-instruct-q4_K_M
 
 ollama-status: ## Check Ollama status
 	@echo "→ Checking Ollama..."

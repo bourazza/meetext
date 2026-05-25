@@ -37,14 +37,14 @@ func (r *MeetingRepository) Create(ctx context.Context, m *meeting.Meeting) erro
 
 func (r *MeetingRepository) GetByID(ctx context.Context, id uuid.UUID) (*meeting.Meeting, error) {
 	q := `SELECT id, workspace_id, project_id, client_id, title, upload_type,
-		         original_file_url, transcript, ai_summary, duration_seconds,
+		         original_file_url, transcript, ai_summary, ai_result_json, duration_seconds,
 		         language, status, processing_started_at, processing_completed_at,
 		         uploaded_by, created_at
 		  FROM meetings WHERE id=$1`
 	m := &meeting.Meeting{}
 	err := r.db.QueryRow(ctx, q, id).Scan(
 		&m.ID, &m.WorkspaceID, &m.ProjectID, &m.ClientID, &m.Title, &m.UploadType,
-		&m.OriginalFileURL, &m.Transcript, &m.AISummary, &m.DurationSeconds,
+		&m.OriginalFileURL, &m.Transcript, &m.AISummary, &m.AIResultJSON, &m.DurationSeconds,
 		&m.Language, &m.Status, &m.ProcessingStartedAt, &m.ProcessingCompletedAt,
 		&m.UploadedBy, &m.CreatedAt,
 	)
@@ -59,7 +59,7 @@ func (r *MeetingRepository) GetByID(ctx context.Context, id uuid.UUID) (*meeting
 
 func (r *MeetingRepository) ListByWorkspace(ctx context.Context, workspaceID uuid.UUID, limit, offset int) ([]*meeting.Meeting, error) {
 	q := `SELECT id, workspace_id, project_id, client_id, title, upload_type,
-		         original_file_url, transcript, ai_summary, duration_seconds,
+		         original_file_url, transcript, ai_summary, ai_result_json, duration_seconds,
 		         language, status, processing_started_at, processing_completed_at,
 		         uploaded_by, created_at
 		  FROM meetings WHERE workspace_id=$1
@@ -69,7 +69,7 @@ func (r *MeetingRepository) ListByWorkspace(ctx context.Context, workspaceID uui
 
 func (r *MeetingRepository) ListByProject(ctx context.Context, projectID uuid.UUID) ([]*meeting.Meeting, error) {
 	q := `SELECT id, workspace_id, project_id, client_id, title, upload_type,
-		         original_file_url, transcript, ai_summary, duration_seconds,
+		         original_file_url, transcript, ai_summary, ai_result_json, duration_seconds,
 		         language, status, processing_started_at, processing_completed_at,
 		         uploaded_by, created_at
 		  FROM meetings WHERE project_id=$1 ORDER BY created_at DESC`
@@ -89,11 +89,11 @@ func (r *MeetingRepository) UpdateStatus(ctx context.Context, id uuid.UUID, stat
 }
 
 func (r *MeetingRepository) Update(ctx context.Context, m *meeting.Meeting) error {
-	q := `UPDATE meetings SET title=$1, transcript=$2, ai_summary=$3,
-		  duration_seconds=$4, language=$5, processing_started_at=$6,
-		  processing_completed_at=$7, status=$8 WHERE id=$9`
+	q := `UPDATE meetings SET title=$1, transcript=$2, ai_summary=$3, ai_result_json=$4,
+		  duration_seconds=$5, language=$6, processing_started_at=$7,
+		  processing_completed_at=$8, status=$9 WHERE id=$10`
 	tag, err := r.db.Exec(ctx, q,
-		m.Title, m.Transcript, m.AISummary, m.DurationSeconds,
+		m.Title, m.Transcript, m.AISummary, m.AIResultJSON, m.DurationSeconds,
 		m.Language, m.ProcessingStartedAt, m.ProcessingCompletedAt,
 		m.Status, m.ID,
 	)
@@ -161,7 +161,7 @@ func (r *MeetingRepository) scanMeetings(ctx context.Context, q string, args ...
 		m := &meeting.Meeting{}
 		if err := rows.Scan(
 			&m.ID, &m.WorkspaceID, &m.ProjectID, &m.ClientID, &m.Title, &m.UploadType,
-			&m.OriginalFileURL, &m.Transcript, &m.AISummary, &m.DurationSeconds,
+			&m.OriginalFileURL, &m.Transcript, &m.AISummary, &m.AIResultJSON, &m.DurationSeconds,
 			&m.Language, &m.Status, &m.ProcessingStartedAt, &m.ProcessingCompletedAt,
 			&m.UploadedBy, &m.CreatedAt,
 		); err != nil {

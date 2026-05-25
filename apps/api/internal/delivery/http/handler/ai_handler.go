@@ -43,7 +43,7 @@ func (h *AIHandler) AnalyzeText(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result, err := h.uc.GenerateMeetingAnalysis(r.Context(), in.Text)
+	result, err := h.uc.GenerateMeetingAnalysis(r.Context(), in.Text, nil)
 	if err != nil {
 		h.log.Error().Err(err).Msg("failed to analyze text")
 		response.Error(w, apperr.Wrap(err, http.StatusInternalServerError, "AI_ANALYSIS_FAILED", "Failed to generate AI analysis"))
@@ -81,7 +81,7 @@ func (h *AIHandler) Upload(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 2. Perform AI Analysis on the transcript
-	result, err := h.uc.GenerateMeetingAnalysis(r.Context(), transcript)
+	result, err := h.uc.GenerateMeetingAnalysis(r.Context(), transcript, nil)
 	if err != nil {
 		h.log.Error().Err(err).Msg("failed to analyze transcript")
 		response.Error(w, apperr.Wrap(err, http.StatusInternalServerError, "AI_ANALYSIS_FAILED", "Failed to generate AI analysis"))

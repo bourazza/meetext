@@ -132,16 +132,44 @@ func (h *MeetingHandler) GetByID(w http.ResponseWriter, r *http.Request) {
 
 // GET /api/v1/workspaces/{workspaceID}/meetings/{meetingID}/status
 // Lightweight polling endpoint — returns only id + status + summary.
+// Validates workspace ownership to prevent unauthorized access.
 func (h *MeetingHandler) GetStatus(w http.ResponseWriter, r *http.Request) {
-	meetingID, err := uuid.Parse(chi.URLParam(r, "meetingID"))
+	workspaceID, err := uuid.Parse(chi.URLParam(r, "workspaceID"))
 	if err != nil {
+		h.log.Warn().Str("workspace_id", chi.URLParam(r, "workspaceID")).Msg("meeting: invalid workspace ID")
 		response.Error(w, apperr.ErrBadRequest)
 		return
 	}
 
+	meetingID, err := uuid.Parse(chi.URLParam(r, "meetingID"))
+	if err != nil {
+		h.log.Warn().Str("meeting_id", chi.URLParam(r, "meetingID")).Msg("meeting: invalid meeting ID")
+		response.Error(w, apperr.ErrBadRequest)
+		return
+	}
+
+	userID, _ := r.Context().Value(constants.CtxUserID).(uuid.UUID)
+
+	h.log.Debug().
+		Str("workspace_id", workspaceID.String()).
+		Str("meeting_id", meetingID.String()).
+		Str("user_id", userID.String()).
+		Msg("meeting: status poll request")
+
 	m, err := h.uc.GetByID(r.Context(), meetingID)
 	if err != nil {
+		h.log.Warn().Err(err).Str("meeting_id", meetingID.String()).Msg("meeting: status fetch failed")
 		response.Error(w, err)
+		return
+	}
+
+	// Validate workspace ownership
+	if m.WorkspaceID != workspaceID {
+		h.log.Warn().
+			Str("meeting_workspace", m.WorkspaceID.String()).
+			Str("requested_workspace", workspaceID.String()).
+			Msg("meeting: workspace mismatch")
+		response.Error(w, apperr.ErrForbidden)
 		return
 	}
 
@@ -149,6 +177,7 @@ func (h *MeetingHandler) GetStatus(w http.ResponseWriter, r *http.Request) {
 		"id":         m.ID,
 		"status":     m.Status,
 		"ai_summary": m.AISummary,
+		"ai_result":  m.AIResultJSON, // Full structured JSON: tasks, decisions, risks, etc.
 	})
 }
 

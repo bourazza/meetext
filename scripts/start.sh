@@ -10,10 +10,10 @@ echo "⏳ Waiting for Ollama to be ready..."
 sleep 10
 
 # Check if model exists, if not pull it
-MODEL="llama3.2:1b"
+MODEL="llama3.1:8b-instruct-q4_K_M"
 echo "📦 Checking if model $MODEL exists..."
 
-if ! docker exec meetext_ollama ollama list | grep -q "$MODEL"; then
+if ! docker exec meetext_ollama ollama list | grep -q "llama3.1:8b"; then
     echo "📥 Pulling model $MODEL (this may take a few minutes)..."
     docker exec meetext_ollama ollama pull "$MODEL"
     echo "✅ Model $MODEL pulled successfully"

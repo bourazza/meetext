@@ -36,6 +36,10 @@ type Meeting struct {
 	OriginalFileURL        string     `json:"original_file_url"`
 	Transcript             *string    `json:"transcript,omitempty"`
 	AISummary              *string    `json:"ai_summary,omitempty"`
+	// AIResultJSON stores the full structured AI output as a JSON string.
+	// This allows the frontend to display tasks, decisions, risks, etc.
+	// without separate API calls to individual relational tables.
+	AIResultJSON           *string    `json:"ai_result,omitempty"`
 	DurationSeconds        *int       `json:"duration_seconds,omitempty"`
 	Language               *string    `json:"language,omitempty"`
 	Status                 Status     `json:"status"`

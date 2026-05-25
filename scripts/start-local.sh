@@ -25,9 +25,9 @@ else
 fi
 
 # Pull model if not exists
-MODEL="llama3.2:1b"
+MODEL="llama3.1:8b-instruct-q4_K_M"
 echo "📦 Checking model $MODEL..."
-if ! ollama list | grep -q "$MODEL"; then
+if ! ollama list | grep -q "llama3.1:8b"; then
     echo "📥 Pulling model $MODEL (this may take a few minutes)..."
     ollama pull "$MODEL"
     echo "✅ Model pulled successfully"
